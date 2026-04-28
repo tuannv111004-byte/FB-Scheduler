@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,13 +29,15 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/lib/store'
-import { Plus, MoreHorizontal, Pencil, Trash2, ExternalLink, Power, PowerOff } from 'lucide-react'
+import { Plus, MoreHorizontal, Pencil, Trash2, ExternalLink, Power, PowerOff, GripVertical } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageModal } from './page-modal'
 import type { FacebookPage } from '@/lib/types'
 
 export function PagesList() {
   const { pages, deletePage, togglePageActive } = useAppStore()
+  const [pageOrderIds, setPageOrderIds] = useState<string[]>([])
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPage, setEditingPage] = useState<FacebookPage | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -64,6 +66,53 @@ export function PagesList() {
     setModalOpen(true)
   }
 
+  const orderedPages = useMemo(() => {
+    const pageById = new Map(pages.map((page) => [page.id, page]))
+    const orderedItems = pageOrderIds
+      .map((id) => pageById.get(id))
+      .filter((page): page is FacebookPage => Boolean(page))
+    const unorderedItems = pages.filter((page) => !pageOrderIds.includes(page.id))
+
+    return [...orderedItems, ...unorderedItems]
+  }, [pages, pageOrderIds])
+
+  const movePage = (fromPageId: string, toPageId: string) => {
+    if (fromPageId === toPageId) return
+
+    setPageOrderIds((current) => {
+      const pageIds = orderedPages.map((page) => page.id)
+      const nextOrder = pageIds.filter((id) => current.includes(id) || id === fromPageId)
+      const fromIndex = nextOrder.indexOf(fromPageId)
+      const toIndex = nextOrder.indexOf(toPageId)
+
+      if (fromIndex === -1 || toIndex === -1) return current
+
+      const [movedPageId] = nextOrder.splice(fromIndex, 1)
+      nextOrder.splice(toIndex, 0, movedPageId)
+
+      return nextOrder
+    })
+  }
+
+  const handlePageDragOver = (event: React.DragEvent<HTMLTableRowElement>, targetPageId: string) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+
+    if (draggedPageId && draggedPageId !== targetPageId) {
+      movePage(draggedPageId, targetPageId)
+    }
+  }
+
+  useEffect(() => {
+    setPageOrderIds((current) => {
+      const pageIds = pages.map((page) => page.id)
+      const keptPageIds = current.filter((id) => pageIds.includes(id))
+      const newPageIds = pageIds.filter((id) => !keptPageIds.includes(id))
+
+      return [...keptPageIds, ...newPageIds]
+    })
+  }, [pages])
+
   return (
     <>
       <Card className="bg-card border-border">
@@ -87,10 +136,40 @@ export function PagesList() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pages.map((page) => (
-                <TableRow key={page.id} className="border-border">
+              {orderedPages.map((page) => (
+                <TableRow
+                  key={page.id}
+                  onDragOver={(event) => handlePageDragOver(event, page.id)}
+                  onDragEnter={(event) => handlePageDragOver(event, page.id)}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    setDraggedPageId(null)
+                  }}
+                  className={cn(
+                    'border-border transition-[background-color,box-shadow,transform] duration-300 ease-out',
+                    draggedPageId === page.id && 'relative z-10 -translate-y-0.5 scale-[1.01] bg-accent/30 shadow-lg ring-1 ring-primary/30'
+                  )}
+                >
                   <TableCell>
                     <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          setDraggedPageId(page.id)
+                          event.dataTransfer.effectAllowed = 'move'
+                          event.dataTransfer.setData('text/plain', page.id)
+                          const dragImage = document.createElement('canvas')
+                          dragImage.width = 1
+                          dragImage.height = 1
+                          event.dataTransfer.setDragImage(dragImage, 0, 0)
+                        }}
+                        onDragEnd={() => setDraggedPageId(null)}
+                        className="cursor-grab rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
+                        title="Drag to reorder pages"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
                       {page.logoUrl ? (
                         <img
                           src={page.logoUrl}

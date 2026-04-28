@@ -55,6 +55,81 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import type { Post, PostStatus } from '@/lib/types'
 
+const copyableImageType = 'image/png'
+const targetImageWidth = 1080
+const targetImageHeight = 1350
+const targetImageRatio = targetImageWidth / targetImageHeight
+
+async function convertImageBlobToClipboardPng(imageBlob: Blob) {
+  const imageUrl = URL.createObjectURL(imageBlob)
+
+  try {
+    const image = new Image()
+    const imageLoadPromise = new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('Failed to load image for clipboard copy.'))
+    })
+
+    image.src = imageUrl
+    await imageLoadPromise
+
+    const canvas = document.createElement('canvas')
+    canvas.width = targetImageWidth
+    canvas.height = targetImageHeight
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Image conversion is not supported by this browser.')
+    }
+
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, targetImageWidth, targetImageHeight)
+
+    const sourceRatio = image.naturalWidth / image.naturalHeight
+    let drawWidth = targetImageWidth
+    let drawHeight = targetImageHeight
+    let offsetX = 0
+    let offsetY = 0
+
+    if (sourceRatio > targetImageRatio) {
+      drawHeight = targetImageHeight
+      drawWidth = drawHeight * sourceRatio
+      offsetX = (targetImageWidth - drawWidth) / 2
+    } else {
+      drawWidth = targetImageWidth
+      drawHeight = drawWidth / sourceRatio
+      offsetY = (targetImageHeight - drawHeight) / 2
+    }
+
+    context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
+
+    const pngBlob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, copyableImageType)
+    })
+
+    if (!pngBlob) {
+      throw new Error('Failed to prepare image for clipboard copy.')
+    }
+
+    return pngBlob
+  } finally {
+    URL.revokeObjectURL(imageUrl)
+  }
+}
+
+async function readBlobImageSize(imageBlob: Blob) {
+  const bitmap = await createImageBitmap(imageBlob)
+
+  try {
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+    }
+  } finally {
+    bitmap.close()
+  }
+}
+
 export function PostsList() {
   const { posts, pages, deletePost, duplicatePost, markAsPosted, selectedDate, setSelectedDate } = useAppStore()
   const [modalOpen, setModalOpen] = useState(false)
@@ -130,9 +205,21 @@ export function PostsList() {
         throw new Error('Selected file is not an image.')
       }
 
+      const clipboardBlob = await convertImageBlobToClipboardPng(imageBlob)
+      const clipboardImageSize = await readBlobImageSize(clipboardBlob)
+
+      if (
+        clipboardImageSize.width !== targetImageWidth ||
+        clipboardImageSize.height !== targetImageHeight
+      ) {
+        throw new Error(
+          `Prepared image is ${clipboardImageSize.width}x${clipboardImageSize.height}, expected ${targetImageWidth}x${targetImageHeight}.`
+        )
+      }
+
       await navigator.clipboard.write([
         new ClipboardItem({
-          [imageBlob.type]: imageBlob,
+          [copyableImageType]: clipboardBlob,
         }),
       ])
 

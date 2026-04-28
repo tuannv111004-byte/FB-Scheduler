@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -37,28 +37,44 @@ type SelectedImageMeta = {
   needsAttention: boolean
 }
 
-async function readImageDimensions(file: File) {
+type ImageSource = Blob | string
+type ImageFocus = {
+  x: number
+  y: number
+}
+
+function clampFocusValue(value: number) {
+  return Math.min(1, Math.max(0, value))
+}
+
+async function readImageDimensions(source: ImageSource) {
   return new Promise<SelectedImageMeta>((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file)
+    const objectUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
     const image = new Image()
 
     image.onload = () => {
       const ratio = image.width / image.height
       const ratioDiff = Math.abs(ratio - TARGET_RATIO)
-      URL.revokeObjectURL(objectUrl)
+      if (typeof source !== 'string') {
+        URL.revokeObjectURL(objectUrl)
+      }
       resolve({
         width: image.width,
         height: image.height,
         ratio,
-        needsAttention: ratioDiff > 0.02,
+        needsAttention:
+          image.width !== TARGET_WIDTH || image.height !== TARGET_HEIGHT || ratioDiff > 0.02,
       })
     }
 
     image.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
+      if (typeof source !== 'string') {
+        URL.revokeObjectURL(objectUrl)
+      }
       reject(new Error('Could not read image dimensions.'))
     }
 
+    image.crossOrigin = 'anonymous'
     image.src = objectUrl
   })
 }
@@ -74,9 +90,14 @@ function extractImageFileFromClipboard(event: ClipboardEvent) {
   return null
 }
 
-async function normalizeImageFile(file: File, fitMode: ImageFitMode) {
+async function normalizeImageFile(
+  source: ImageSource,
+  fitMode: ImageFitMode,
+  imageFocus: ImageFocus,
+  fileName = 'post-image'
+) {
   return new Promise<File>((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file)
+    const objectUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
     const image = new Image()
 
     image.onload = () => {
@@ -103,21 +124,21 @@ async function normalizeImageFile(file: File, fitMode: ImageFitMode) {
           if (sourceRatio > TARGET_RATIO) {
             drawHeight = TARGET_HEIGHT
             drawWidth = drawHeight * sourceRatio
-            offsetX = (TARGET_WIDTH - drawWidth) / 2
+            offsetX = (TARGET_WIDTH - drawWidth) * imageFocus.x
           } else {
             drawWidth = TARGET_WIDTH
             drawHeight = drawWidth / sourceRatio
-            offsetY = (TARGET_HEIGHT - drawHeight) / 2
+            offsetY = (TARGET_HEIGHT - drawHeight) * imageFocus.y
           }
         } else {
           if (sourceRatio > TARGET_RATIO) {
             drawWidth = TARGET_WIDTH
             drawHeight = drawWidth / sourceRatio
-            offsetY = (TARGET_HEIGHT - drawHeight) / 2
+            offsetY = (TARGET_HEIGHT - drawHeight) * imageFocus.y
           } else {
             drawHeight = TARGET_HEIGHT
             drawWidth = drawHeight * sourceRatio
-            offsetX = (TARGET_WIDTH - drawWidth) / 2
+            offsetX = (TARGET_WIDTH - drawWidth) * imageFocus.x
           }
         }
 
@@ -125,16 +146,19 @@ async function normalizeImageFile(file: File, fitMode: ImageFitMode) {
 
         canvas.toBlob(
           (blob) => {
-            URL.revokeObjectURL(objectUrl)
+            if (typeof source !== 'string') {
+              URL.revokeObjectURL(objectUrl)
+            }
 
             if (!blob) {
               reject(new Error('Failed to export normalized image.'))
               return
             }
 
+            const normalizedFileName = fileName.replace(/\.[^.]+$/, '') || 'post-image'
             const normalizedFile = new File(
               [blob],
-              file.name.replace(/\.[^.]+$/, '') + '-1080x1350.jpg',
+              normalizedFileName + '-1080x1350.jpg',
               { type: 'image/jpeg' }
             )
 
@@ -144,18 +168,47 @@ async function normalizeImageFile(file: File, fitMode: ImageFitMode) {
           0.92
         )
       } catch (error) {
-        URL.revokeObjectURL(objectUrl)
+        if (typeof source !== 'string') {
+          URL.revokeObjectURL(objectUrl)
+        }
         reject(error instanceof Error ? error : new Error('Image processing failed.'))
       }
     }
 
     image.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
+      if (typeof source !== 'string') {
+        URL.revokeObjectURL(objectUrl)
+      }
       reject(new Error('Could not load the selected image.'))
     }
 
+    image.crossOrigin = 'anonymous'
     image.src = objectUrl
   })
+}
+
+async function fetchImageUrlAsBlob(imageUrl: string) {
+  const response = await fetch(imageUrl)
+  if (!response.ok) {
+    throw new Error('Could not download image URL for 1080x1350 processing.')
+  }
+
+  const imageBlob = await response.blob()
+  if (!imageBlob.type.startsWith('image/')) {
+    throw new Error('Image URL did not return an image file.')
+  }
+
+  return imageBlob
+}
+
+function imageUrlToFileName(imageUrl: string) {
+  try {
+    const pathname = new URL(imageUrl).pathname
+    const fileName = pathname.split('/').filter(Boolean).pop()
+    return fileName || 'post-image'
+  } catch {
+    return 'post-image'
+  }
 }
 
 interface PostModalProps {
@@ -190,8 +243,15 @@ export function PostModal({
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState('')
   const [selectedImageMeta, setSelectedImageMeta] = useState<SelectedImageMeta | null>(null)
   const [imageFitMode, setImageFitMode] = useState<ImageFitMode>('fill')
+  const [imageFocus, setImageFocus] = useState<ImageFocus>({ x: 0.5, y: 0.5 })
+  const cropDragStartRef = useRef<{
+    clientX: number
+    clientY: number
+    focus: ImageFocus
+  } | null>(null)
 
   const [formData, setFormData] = useState({
     pageId: '',
@@ -232,8 +292,23 @@ export function PostModal({
     setSelectedFile(null)
     setSelectedImageMeta(null)
     setImageFitMode('fill')
+    setImageFocus({ x: 0.5, y: 0.5 })
     setErrorMessage('')
   }, [post, open, defaultPageId, defaultTimeSlot, defaultDate, selectedDate])
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setSelectedImagePreviewUrl('')
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(selectedFile)
+    setSelectedImagePreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedFile])
 
   useEffect(() => {
     if (!open) return
@@ -262,6 +337,22 @@ export function PostModal({
   }, [open])
 
   const selectedPage = pages.find((p) => p.id === formData.pageId)
+  const previewImageUrl = selectedImagePreviewUrl || formData.imageUrl.trim()
+  const showImageResizeControls = selectedImageMeta?.needsAttention || Boolean(previewImageUrl)
+
+  const updateImageFocusFromPointerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!cropDragStartRef.current) return
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const deltaX = (event.clientX - cropDragStartRef.current.clientX) / rect.width
+    const deltaY = (event.clientY - cropDragStartRef.current.clientY) / rect.height
+    const dragDirection = imageFitMode === 'fit' ? 1 : -1
+
+    setImageFocus({
+      x: clampFocusValue(cropDragStartRef.current.focus.x + deltaX * dragDirection),
+      y: clampFocusValue(cropDragStartRef.current.focus.y + deltaY * dragDirection),
+    })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -278,10 +369,30 @@ export function PostModal({
       }
 
       if (selectedFile) {
-        const normalizedFile = await normalizeImageFile(selectedFile, imageFitMode)
+        const normalizedFile = await normalizeImageFile(
+          selectedFile,
+          imageFitMode,
+          imageFocus,
+          selectedFile.name
+        )
         const uploadedImage = await uploadPostImage(normalizedFile)
         nextImagePath = uploadedImage.imagePath
         nextImageUrl = uploadedImage.imageUrl
+      } else if (nextImageUrl.trim() && isSupabaseConfigured) {
+        const imageBlob = await fetchImageUrlAsBlob(nextImageUrl)
+        const imageMeta = await readImageDimensions(imageBlob)
+
+        if (imageMeta.needsAttention) {
+          const normalizedFile = await normalizeImageFile(
+            imageBlob,
+            imageFitMode,
+            imageFocus,
+            imageUrlToFileName(nextImageUrl)
+          )
+          const uploadedImage = await uploadPostImage(normalizedFile)
+          nextImagePath = uploadedImage.imagePath
+          nextImageUrl = uploadedImage.imageUrl
+        }
       }
 
       const payload = {
@@ -451,14 +562,60 @@ export function PostModal({
             </p>
           </div>
 
-          {selectedImageMeta?.needsAttention && (
+          {showImageResizeControls && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
-              <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                This image does not match the 1080x1350 (4:5) format.
-              </p>
-              <p className="mt-1 text-xs text-amber-700/80 dark:text-amber-200/90">
+              {selectedImageMeta?.needsAttention && (
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                  This image does not match the 1080x1350 (4:5) format.
+                </p>
+              )}
+              <p className="text-xs text-amber-700/80 dark:text-amber-200/90">
                 `Fill` will crop the image to fill the frame. `Fit` will keep the full image and add white space if needed.
               </p>
+              {previewImageUrl && (
+                <div className="mt-3 space-y-2">
+                  <Label>Crop preview</Label>
+                  <div
+                    className="relative mx-auto aspect-[4/5] max-h-72 w-full max-w-56 cursor-grab touch-none overflow-hidden rounded-md border border-border bg-white active:cursor-grabbing"
+                    onPointerDown={(event) => {
+                      cropDragStartRef.current = {
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                        focus: imageFocus,
+                      }
+                      event.currentTarget.setPointerCapture(event.pointerId)
+                    }}
+                    onPointerMove={(event) => {
+                      if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+                      updateImageFocusFromPointerDrag(event)
+                    }}
+                    onPointerUp={(event) => {
+                      cropDragStartRef.current = null
+                      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                        event.currentTarget.releasePointerCapture(event.pointerId)
+                      }
+                    }}
+                    onPointerCancel={(event) => {
+                      cropDragStartRef.current = null
+                      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                        event.currentTarget.releasePointerCapture(event.pointerId)
+                      }
+                    }}
+                  >
+                    <img
+                      src={previewImageUrl}
+                      alt=""
+                      draggable={false}
+                      className="h-full w-full select-none"
+                      style={{
+                        objectFit: imageFitMode === 'fill' ? 'cover' : 'contain',
+                        objectPosition: `${imageFocus.x * 100}% ${imageFocus.y * 100}%`,
+                      }}
+                    />
+                    <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-black/10" />
+                  </div>
+                </div>
+              )}
               <div className="mt-3 space-y-2">
                 <Label htmlFor="imageFitMode">Resize mode</Label>
                 <Select
@@ -474,17 +631,6 @@ export function PostModal({
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-          )}
-
-          {formData.imageUrl && (
-            <div className="space-y-2">
-              <Label>Preview</Label>
-              <img
-                src={formData.imageUrl}
-                alt=""
-                className="h-28 w-full rounded-md border border-border object-cover"
-              />
             </div>
           )}
 

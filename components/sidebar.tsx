@@ -12,6 +12,7 @@ import {
   Bell,
   Facebook,
   PanelLeftClose,
+  NotebookText,
 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
 import { useDesktopSidebar } from '@/hooks/use-desktop-sidebar'
@@ -21,6 +22,7 @@ const navigation = [
   { name: 'Pages', href: '/pages', icon: Facebook },
   { name: 'Posts', href: '/posts', icon: FileText },
   { name: 'Schedule', href: '/schedule', icon: Calendar },
+  { name: 'Notes', href: '/notes', icon: NotebookText },
 ]
 
 export function Sidebar() {
