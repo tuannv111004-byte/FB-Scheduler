@@ -1,0 +1,259 @@
+import { createClient } from '@supabase/supabase-js'
+import type { FacebookPage, PageInput, Post, PostInput, PostStatus } from './types'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey)
+
+declare global {
+  interface Window {
+    __postopsSupabase?: ReturnType<typeof createClient>
+  }
+}
+
+function getSupabaseClient() {
+  if (!isSupabaseConfigured) return null
+
+  if (typeof window === 'undefined') {
+    return createClient(supabaseUrl!, supabaseKey!)
+  }
+
+  if (!window.__postopsSupabase) {
+    window.__postopsSupabase = createClient(supabaseUrl!, supabaseKey!)
+  }
+
+  return window.__postopsSupabase
+}
+
+export const supabase = getSupabaseClient()
+
+type PageRow = {
+  id: string
+  name: string
+  page_url: string | null
+  logo_url: string | null
+  brand_color: string | null
+  is_active: boolean
+  posts_per_day: number
+  time_slots: string[] | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+type PostRow = {
+  id: string
+  page_id: string
+  post_date: string
+  time_slot: string
+  image_path: string | null
+  image_url: string | null
+  caption: string
+  ads_link: string | null
+  status: PostStatus
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+function mapPageRow(row: PageRow): FacebookPage {
+  return {
+    id: row.id,
+    name: row.name,
+    pageUrl: row.page_url ?? '',
+    logoUrl: row.logo_url ?? undefined,
+    brandColor: row.brand_color ?? '#14b8a6',
+    isActive: row.is_active,
+    postsPerDay: row.posts_per_day,
+    timeSlots: row.time_slots ?? [],
+    notes: row.notes ?? '',
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
+function mapPostRow(row: PostRow): Post {
+  return {
+    id: row.id,
+    pageId: row.page_id,
+    postDate: row.post_date,
+    timeSlot: row.time_slot,
+    imagePath: row.image_path ?? undefined,
+    imageUrl: row.image_url ?? undefined,
+    caption: row.caption,
+    adsLink: row.ads_link ?? undefined,
+    status: row.status,
+    notes: row.notes ?? '',
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
+function pagePayload(input: PageInput) {
+  return {
+    name: input.name,
+    page_url: input.pageUrl || null,
+    logo_url: input.logoUrl || null,
+    brand_color: input.brandColor,
+    is_active: input.isActive,
+    posts_per_day: input.postsPerDay,
+    time_slots: input.timeSlots,
+    notes: input.notes || null,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function postPayload(input: PostInput) {
+  return {
+    page_id: input.pageId,
+    post_date: input.postDate,
+    time_slot: input.timeSlot,
+    image_path: input.imagePath || null,
+    image_url: input.imageUrl || null,
+    caption: input.caption,
+    ads_link: input.adsLink || null,
+    status: input.status,
+    notes: input.notes || null,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function requireSupabase() {
+  if (!supabase) {
+    throw new Error('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.')
+  }
+  return supabase
+}
+
+export async function fetchPagesRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('pages')
+    .select('*')
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  return (data as PageRow[]).map(mapPageRow)
+}
+
+export async function fetchPostsRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('posts')
+    .select('*')
+    .order('post_date', { ascending: true })
+    .order('time_slot', { ascending: true })
+
+  if (error) throw error
+  return (data as PostRow[]).map(mapPostRow)
+}
+
+export async function createPageRemote(input: PageInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('pages')
+    .insert(pagePayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPageRow(data as PageRow)
+}
+
+export async function updatePageRemote(id: string, updates: Partial<PageInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.name !== undefined) payload.name = updates.name
+  if (updates.pageUrl !== undefined) payload.page_url = updates.pageUrl || null
+  if (updates.logoUrl !== undefined) payload.logo_url = updates.logoUrl || null
+  if (updates.brandColor !== undefined) payload.brand_color = updates.brandColor
+  if (updates.isActive !== undefined) payload.is_active = updates.isActive
+  if (updates.postsPerDay !== undefined) payload.posts_per_day = updates.postsPerDay
+  if (updates.timeSlots !== undefined) payload.time_slots = updates.timeSlots
+  if (updates.notes !== undefined) payload.notes = updates.notes || null
+
+  const { data, error } = await client
+    .from('pages')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPageRow(data as PageRow)
+}
+
+export async function deletePageRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('pages').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function createPostRemote(input: PostInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('posts')
+    .insert(postPayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPostRow(data as PostRow)
+}
+
+export async function updatePostRemote(id: string, updates: Partial<PostInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.pageId !== undefined) payload.page_id = updates.pageId
+  if (updates.postDate !== undefined) payload.post_date = updates.postDate
+  if (updates.timeSlot !== undefined) payload.time_slot = updates.timeSlot
+  if (updates.imagePath !== undefined) payload.image_path = updates.imagePath || null
+  if (updates.imageUrl !== undefined) payload.image_url = updates.imageUrl || null
+  if (updates.caption !== undefined) payload.caption = updates.caption
+  if (updates.adsLink !== undefined) payload.ads_link = updates.adsLink || null
+  if (updates.status !== undefined) payload.status = updates.status
+  if (updates.notes !== undefined) payload.notes = updates.notes || null
+
+  const { data, error } = await client
+    .from('posts')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPostRow(data as PostRow)
+}
+
+export async function deletePostRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('posts').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function uploadPostImage(file: File) {
+  const client = requireSupabase()
+  const fileExtension = file.name.split('.').pop() || 'jpg'
+  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExtension}`
+  const filePath = `posts/${fileName}`
+
+  const { error: uploadError } = await client.storage
+    .from('post-images')
+    .upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type,
+    })
+
+  if (uploadError) throw uploadError
+
+  const { data } = client.storage.from('post-images').getPublicUrl(filePath)
+
+  return {
+    imagePath: filePath,
+    imageUrl: data.publicUrl,
+  }
+}
