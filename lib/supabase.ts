@@ -3,6 +3,12 @@ import type {
   FacebookPage,
   NoteInput,
   PageInput,
+  PosterLabFranchise,
+  PosterLabFranchiseInput,
+  PosterLabGenre,
+  PosterLabSequel,
+  PosterLabSequelInput,
+  PosterLabTmdbCandidate,
   Post,
   PostInput,
   PostStatus,
@@ -114,6 +120,38 @@ type SourceRow = {
   updated_at: string
 }
 
+type PosterLabFranchiseRow = {
+  id: string
+  franchise_name: string
+  latest_official_title: string
+  genre: PosterLabGenre
+  notes: string
+  tmdb_movie_id: number | null
+  tmdb_genre_ids: number[] | null
+  tmdb_genre_names: string[] | null
+  release_date: string | null
+  overview: string | null
+  poster_path: string | null
+  backdrop_path: string | null
+  source_category: string | null
+  created_at: string
+  updated_at: string
+}
+
+type PosterLabSequelRow = {
+  id: string
+  franchise_id: string
+  fake_title: string
+  release_year: number
+  tagline: string
+  synopsis: string
+  visual_hook: string
+  prompt: string
+  is_used: boolean
+  created_at: string
+  updated_at: string
+}
+
 function mapPageRow(row: PageRow): FacebookPage {
   return {
     id: row.id,
@@ -193,6 +231,42 @@ function mapSourceRow(row: SourceRow): SourceItem {
   }
 }
 
+function mapPosterLabFranchiseRow(row: PosterLabFranchiseRow): PosterLabFranchise {
+  return {
+    id: row.id,
+    franchiseName: row.franchise_name,
+    latestOfficialTitle: row.latest_official_title,
+    genre: row.genre,
+    notes: row.notes,
+    tmdbMovieId: row.tmdb_movie_id,
+    tmdbGenreIds: row.tmdb_genre_ids ?? [],
+    tmdbGenreNames: row.tmdb_genre_names ?? [],
+    releaseDate: row.release_date ?? undefined,
+    overview: row.overview ?? undefined,
+    posterPath: row.poster_path ?? undefined,
+    backdropPath: row.backdrop_path ?? undefined,
+    sourceCategory: row.source_category ?? undefined,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
+function mapPosterLabSequelRow(row: PosterLabSequelRow): PosterLabSequel {
+  return {
+    id: row.id,
+    franchiseId: row.franchise_id,
+    fakeTitle: row.fake_title,
+    releaseYear: row.release_year,
+    tagline: row.tagline,
+    synopsis: row.synopsis,
+    visualHook: row.visual_hook,
+    prompt: row.prompt,
+    isUsed: row.is_used,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
 function pagePayload(input: PageInput) {
   return {
     name: input.name,
@@ -257,6 +331,38 @@ function sourcePayload(input: SourceInput) {
     description: input.description,
     notes: input.notes,
     is_active: input.isActive,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function posterLabFranchisePayload(input: PosterLabFranchiseInput) {
+  return {
+    franchise_name: input.franchiseName,
+    latest_official_title: input.latestOfficialTitle,
+    genre: input.genre,
+    notes: input.notes,
+    tmdb_movie_id: input.tmdbMovieId ?? null,
+    tmdb_genre_ids: input.tmdbGenreIds?.length ? input.tmdbGenreIds : null,
+    tmdb_genre_names: input.tmdbGenreNames?.length ? input.tmdbGenreNames : null,
+    release_date: input.releaseDate || null,
+    overview: input.overview || null,
+    poster_path: input.posterPath || null,
+    backdrop_path: input.backdropPath || null,
+    source_category: input.sourceCategory || null,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function posterLabSequelPayload(input: PosterLabSequelInput) {
+  return {
+    franchise_id: input.franchiseId,
+    fake_title: input.fakeTitle,
+    release_year: input.releaseYear,
+    tagline: input.tagline,
+    synopsis: input.synopsis,
+    visual_hook: input.visualHook,
+    prompt: input.prompt,
+    is_used: input.isUsed,
     updated_at: new Date().toISOString(),
   }
 }
@@ -401,6 +507,154 @@ export async function createSourceRemote(input: SourceInput) {
 
   if (error) throw error
   return mapSourceRow(data as SourceRow)
+}
+
+export async function fetchPosterLabFranchisesRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('poster_lab_franchises')
+    .select('*')
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return (data as PosterLabFranchiseRow[]).map(mapPosterLabFranchiseRow)
+}
+
+export async function createPosterLabFranchiseRemote(input: PosterLabFranchiseInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('poster_lab_franchises')
+    .insert(posterLabFranchisePayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPosterLabFranchiseRow(data as PosterLabFranchiseRow)
+}
+
+export async function updatePosterLabFranchiseRemote(
+  id: string,
+  updates: Partial<PosterLabFranchiseInput>
+) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.franchiseName !== undefined) payload.franchise_name = updates.franchiseName
+  if (updates.latestOfficialTitle !== undefined) payload.latest_official_title = updates.latestOfficialTitle
+  if (updates.genre !== undefined) payload.genre = updates.genre
+  if (updates.notes !== undefined) payload.notes = updates.notes
+  if (updates.tmdbMovieId !== undefined) payload.tmdb_movie_id = updates.tmdbMovieId
+  if (updates.tmdbGenreIds !== undefined) payload.tmdb_genre_ids = updates.tmdbGenreIds.length ? updates.tmdbGenreIds : null
+  if (updates.tmdbGenreNames !== undefined) payload.tmdb_genre_names = updates.tmdbGenreNames.length ? updates.tmdbGenreNames : null
+  if (updates.releaseDate !== undefined) payload.release_date = updates.releaseDate || null
+  if (updates.overview !== undefined) payload.overview = updates.overview || null
+  if (updates.posterPath !== undefined) payload.poster_path = updates.posterPath || null
+  if (updates.backdropPath !== undefined) payload.backdrop_path = updates.backdropPath || null
+  if (updates.sourceCategory !== undefined) payload.source_category = updates.sourceCategory || null
+
+  const { data, error } = await client
+    .from('poster_lab_franchises')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPosterLabFranchiseRow(data as PosterLabFranchiseRow)
+}
+
+export async function deletePosterLabFranchiseRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('poster_lab_franchises').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function createPosterLabFranchisesBulkRemote(items: PosterLabTmdbCandidate[]) {
+  if (items.length === 0) {
+    return [] as PosterLabFranchise[]
+  }
+
+  const client = requireSupabase()
+  const tmdbMovieIds = items.map((item) => item.tmdbMovieId)
+
+  const { data: existingRows, error: existingError } = await client
+    .from('poster_lab_franchises')
+    .select('tmdb_movie_id')
+    .in('tmdb_movie_id', tmdbMovieIds)
+
+  if (existingError) throw existingError
+
+  const existingIds = new Set(
+    ((existingRows as Array<{ tmdb_movie_id: number | null }> | null) ?? [])
+      .map((row) => row.tmdb_movie_id)
+      .filter((value): value is number => typeof value === 'number')
+  )
+
+  const uniqueItems = items.filter((item) => !existingIds.has(item.tmdbMovieId))
+  if (uniqueItems.length === 0) {
+    return [] as PosterLabFranchise[]
+  }
+
+  const { data, error } = await client
+    .from('poster_lab_franchises')
+    .insert(uniqueItems.map((item) => posterLabFranchisePayload(item)))
+    .select('*')
+
+  if (error) throw error
+  return (data as PosterLabFranchiseRow[]).map(mapPosterLabFranchiseRow)
+}
+
+export async function fetchPosterLabSequelsRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('poster_lab_sequels')
+    .select('*')
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return (data as PosterLabSequelRow[]).map(mapPosterLabSequelRow)
+}
+
+export async function createPosterLabSequelRemote(input: PosterLabSequelInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('poster_lab_sequels')
+    .insert(posterLabSequelPayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPosterLabSequelRow(data as PosterLabSequelRow)
+}
+
+export async function updatePosterLabSequelRemote(id: string, updates: Partial<PosterLabSequelInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.franchiseId !== undefined) payload.franchise_id = updates.franchiseId
+  if (updates.fakeTitle !== undefined) payload.fake_title = updates.fakeTitle
+  if (updates.releaseYear !== undefined) payload.release_year = updates.releaseYear
+  if (updates.tagline !== undefined) payload.tagline = updates.tagline
+  if (updates.synopsis !== undefined) payload.synopsis = updates.synopsis
+  if (updates.visualHook !== undefined) payload.visual_hook = updates.visualHook
+  if (updates.prompt !== undefined) payload.prompt = updates.prompt
+  if (updates.isUsed !== undefined) payload.is_used = updates.isUsed
+
+  const { data, error } = await client
+    .from('poster_lab_sequels')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapPosterLabSequelRow(data as PosterLabSequelRow)
+}
+
+export async function deletePosterLabSequelRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('poster_lab_sequels').delete().eq('id', id)
+  if (error) throw error
 }
 
 export async function updateSourceRemote(id: string, updates: Partial<SourceInput>) {

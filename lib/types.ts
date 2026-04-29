@@ -97,6 +97,82 @@ export interface SourceItem extends SourceInput {
   updatedAt: Date
 }
 
+export type PosterLabGenre =
+  | 'action'
+  | 'horror'
+  | 'sci_fi'
+  | 'fantasy'
+  | 'thriller'
+  | 'drama'
+  | 'romance'
+  | 'comedy'
+  | 'mystery'
+  | 'crime'
+  | 'animation'
+  | 'other'
+
+export type PosterLabImportSort =
+  | 'popularity.desc'
+  | 'vote_average.desc'
+  | 'primary_release_date.desc'
+  | 'revenue.desc'
+
+export interface PosterLabFranchiseInput {
+  franchiseName: string
+  latestOfficialTitle: string
+  genre: PosterLabGenre
+  notes: string
+  tmdbMovieId?: number | null
+  tmdbGenreIds?: number[]
+  tmdbGenreNames?: string[]
+  releaseDate?: string
+  overview?: string
+  posterPath?: string
+  backdropPath?: string
+  sourceCategory?: string
+}
+
+export interface PosterLabFranchise extends PosterLabFranchiseInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface PosterLabTmdbGenre {
+  id: number
+  name: string
+}
+
+export interface PosterLabTmdbCandidate extends PosterLabFranchiseInput {
+  tmdbMovieId: number
+}
+
+export interface PosterLabTmdbDiscoverRequest {
+  genreId?: number
+  genreName?: string
+  pageCount: number
+  maxResults: number
+  sortBy: PosterLabImportSort
+  minVoteCount: number
+}
+
+export interface PosterLabSequelInput {
+  franchiseId: string
+  fakeTitle: string
+  releaseYear: number
+  tagline: string
+  synopsis: string
+  visualHook: string
+  prompt: string
+  isUsed: boolean
+}
+
+export interface PosterLabSequel extends PosterLabSequelInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface Notification {
   id: string
   type: 'warning' | 'error' | 'info' | 'success'

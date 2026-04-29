@@ -81,6 +81,55 @@ create table if not exists sources (
 create index if not exists sources_type_idx on sources(type);
 create index if not exists sources_active_idx on sources(is_active);
 
+create table if not exists poster_lab_franchises (
+  id uuid primary key default gen_random_uuid(),
+  franchise_name text not null,
+  latest_official_title text not null,
+  genre text not null default 'other',
+  notes text not null default '',
+  tmdb_movie_id integer,
+  tmdb_genre_ids integer[] not null default '{}',
+  tmdb_genre_names text[] not null default '{}',
+  release_date date,
+  overview text,
+  poster_path text,
+  backdrop_path text,
+  source_category text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table poster_lab_franchises add column if not exists tmdb_movie_id integer;
+alter table poster_lab_franchises add column if not exists tmdb_genre_ids integer[] not null default '{}';
+alter table poster_lab_franchises add column if not exists tmdb_genre_names text[] not null default '{}';
+alter table poster_lab_franchises add column if not exists release_date date;
+alter table poster_lab_franchises add column if not exists overview text;
+alter table poster_lab_franchises add column if not exists poster_path text;
+alter table poster_lab_franchises add column if not exists backdrop_path text;
+alter table poster_lab_franchises add column if not exists source_category text;
+
+create table if not exists poster_lab_sequels (
+  id uuid primary key default gen_random_uuid(),
+  franchise_id uuid not null references poster_lab_franchises(id) on delete cascade,
+  fake_title text not null,
+  release_year integer not null,
+  tagline text not null default '',
+  synopsis text not null default '',
+  visual_hook text not null default '',
+  prompt text not null default '',
+  is_used boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists poster_lab_franchises_genre_idx on poster_lab_franchises(genre);
+create unique index if not exists poster_lab_franchises_tmdb_movie_id_idx
+on poster_lab_franchises(tmdb_movie_id)
+where tmdb_movie_id is not null;
+create index if not exists poster_lab_sequels_franchise_idx on poster_lab_sequels(franchise_id);
+create index if not exists poster_lab_sequels_used_idx on poster_lab_sequels(is_used);
+create index if not exists poster_lab_sequels_release_year_idx on poster_lab_sequels(release_year);
+
 create table if not exists page_vias (
   page_id uuid not null references pages(id) on delete cascade,
   via_id uuid not null references vias(id) on delete cascade,
@@ -97,6 +146,8 @@ alter table posts enable row level security;
 alter table notes enable row level security;
 alter table vias enable row level security;
 alter table sources enable row level security;
+alter table poster_lab_franchises enable row level security;
+alter table poster_lab_sequels enable row level security;
 alter table page_vias enable row level security;
 
 drop policy if exists "public can read pages" on pages;
@@ -119,6 +170,14 @@ drop policy if exists "public can read sources" on sources;
 drop policy if exists "public can insert sources" on sources;
 drop policy if exists "public can update sources" on sources;
 drop policy if exists "public can delete sources" on sources;
+drop policy if exists "public can read poster lab franchises" on poster_lab_franchises;
+drop policy if exists "public can insert poster lab franchises" on poster_lab_franchises;
+drop policy if exists "public can update poster lab franchises" on poster_lab_franchises;
+drop policy if exists "public can delete poster lab franchises" on poster_lab_franchises;
+drop policy if exists "public can read poster lab sequels" on poster_lab_sequels;
+drop policy if exists "public can insert poster lab sequels" on poster_lab_sequels;
+drop policy if exists "public can update poster lab sequels" on poster_lab_sequels;
+drop policy if exists "public can delete poster lab sequels" on poster_lab_sequels;
 drop policy if exists "public can read page vias" on page_vias;
 drop policy if exists "public can insert page vias" on page_vias;
 drop policy if exists "public can update page vias" on page_vias;
@@ -226,6 +285,48 @@ with check (true);
 
 create policy "public can delete sources"
 on sources for delete
+to anon
+using (true);
+
+create policy "public can read poster lab franchises"
+on poster_lab_franchises for select
+to anon
+using (true);
+
+create policy "public can insert poster lab franchises"
+on poster_lab_franchises for insert
+to anon
+with check (true);
+
+create policy "public can update poster lab franchises"
+on poster_lab_franchises for update
+to anon
+using (true)
+with check (true);
+
+create policy "public can delete poster lab franchises"
+on poster_lab_franchises for delete
+to anon
+using (true);
+
+create policy "public can read poster lab sequels"
+on poster_lab_sequels for select
+to anon
+using (true);
+
+create policy "public can insert poster lab sequels"
+on poster_lab_sequels for insert
+to anon
+with check (true);
+
+create policy "public can update poster lab sequels"
+on poster_lab_sequels for update
+to anon
+using (true)
+with check (true);
+
+create policy "public can delete poster lab sequels"
+on poster_lab_sequels for delete
 to anon
 using (true);
 

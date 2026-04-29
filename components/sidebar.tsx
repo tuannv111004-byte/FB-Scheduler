@@ -11,6 +11,7 @@ import {
   Settings,
   Bell,
   Facebook,
+  Film,
   PanelLeftClose,
   NotebookText,
   SearchCheck,
@@ -25,6 +26,7 @@ const navigation = [
   { name: 'Posts', href: '/posts', icon: FileText },
   { name: 'Schedule', href: '/schedule', icon: Calendar },
   { name: 'Notes', href: '/notes', icon: NotebookText },
+  { name: 'Poster Lab', href: '/poster-lab', icon: Film },
   { name: 'Sources', href: '/sources', icon: SearchCheck },
   { name: 'Via', href: '/via', icon: ShieldCheck },
 ]
