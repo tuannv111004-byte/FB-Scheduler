@@ -190,13 +190,16 @@ export function PostsList() {
     top: number
     left: number
   } | null>(null)
+  const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null)
 
   const handleEdit = (post: Post) => {
+    setHighlightedPostId(post.id)
     setEditingPost(post)
     setModalOpen(true)
   }
 
   const handleDelete = (post: Post) => {
+    setHighlightedPostId(post.id)
     setPostToDelete(post)
     setDeleteDialogOpen(true)
   }
@@ -402,12 +405,22 @@ export function PostsList() {
                   </TableRow>
                 ) : (
                   filteredPosts.map((post) => (
-                    <TableRow key={post.id} className="border-border">
+                    <TableRow
+                      key={post.id}
+                      className={`border-border transition-colors ${
+                        highlightedPostId === post.id
+                          ? 'bg-primary/8 shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/12'
+                          : 'hover:bg-accent/20'
+                      }`}
+                    >
                       <TableCell>
                         {post.imageUrl ? (
                           <button
                             type="button"
-                            onClick={() => copyImage(post.imageUrl!)}
+                            onClick={() => {
+                              setHighlightedPostId(post.id)
+                              void copyImage(post.imageUrl!)
+                            }}
                             className="block overflow-hidden rounded"
                             onMouseEnter={(event) => {
                               if (!zoomImagesOnHover) return
@@ -462,7 +475,10 @@ export function PostsList() {
                       <TableCell className="max-w-48">
                         <button
                           type="button"
-                          onClick={() => copyText(post.caption, 'Caption')}
+                          onClick={() => {
+                            setHighlightedPostId(post.id)
+                            void copyText(post.caption, 'Caption')
+                          }}
                           className="block w-full truncate text-left text-sm text-foreground hover:text-primary"
                           title="Click to copy caption"
                         >
@@ -474,7 +490,10 @@ export function PostsList() {
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => copyText(post.adsLink!, 'Ads link')}
+                              onClick={() => {
+                                setHighlightedPostId(post.id)
+                                void copyText(post.adsLink!, 'Ads link')
+                              }}
                               className="text-xs text-primary hover:underline"
                               title="Click to copy ads link"
                             >
@@ -504,7 +523,10 @@ export function PostsList() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-green-400 hover:text-green-300 hover:bg-green-500/10"
-                              onClick={() => markAsPosted(post.id)}
+                              onClick={() => {
+                                setHighlightedPostId(post.id)
+                                void markAsPosted(post.id)
+                              }}
                               title="Mark as Posted"
                             >
                               <CheckCircle2 className="h-4 w-4" />
@@ -521,7 +543,12 @@ export function PostsList() {
                                 <Pencil className="h-4 w-4 mr-2" />
                                 Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => duplicatePost(post.id)}>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setHighlightedPostId(post.id)
+                                  void duplicatePost(post.id)
+                                }}
+                              >
                                 <Copy className="h-4 w-4 mr-2" />
                                 Duplicate
                               </DropdownMenuItem>

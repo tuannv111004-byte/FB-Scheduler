@@ -13,6 +13,8 @@ import {
   Facebook,
   PanelLeftClose,
   NotebookText,
+  SearchCheck,
+  ShieldCheck,
 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
 import { useDesktopSidebar } from '@/hooks/use-desktop-sidebar'
@@ -23,6 +25,8 @@ const navigation = [
   { name: 'Posts', href: '/posts', icon: FileText },
   { name: 'Schedule', href: '/schedule', icon: Calendar },
   { name: 'Notes', href: '/notes', icon: NotebookText },
+  { name: 'Sources', href: '/sources', icon: SearchCheck },
+  { name: 'Via', href: '/via', icon: ShieldCheck },
 ]
 
 export function Sidebar() {

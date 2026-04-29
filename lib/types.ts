@@ -55,6 +55,48 @@ export interface StickyNote extends NoteInput {
   updatedAt: Date
 }
 
+export type ViaStatus = 'active' | 'inactive' | 'checkpoint'
+
+export type ViaLocation = 'personal_laptop' | 'company_computer'
+
+export interface ViaInput {
+  accountName: string
+  accountLink: string
+  accountPassword: string
+  displayName: string
+  twoFactorCode: string
+  outlookEmail: string
+  outlookPassword: string
+  viaEmail: string
+  avatarUrl?: string
+  status: ViaStatus
+  location: ViaLocation
+  pageIds: string[]
+}
+
+export interface ViaAccount extends ViaInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type SourceType = 'website' | 'social' | 'news' | 'community' | 'tool' | 'other'
+
+export interface SourceInput {
+  name: string
+  url: string
+  type: SourceType
+  description: string
+  notes: string
+  isActive: boolean
+}
+
+export interface SourceItem extends SourceInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface Notification {
   id: string
   type: 'warning' | 'error' | 'info' | 'success'

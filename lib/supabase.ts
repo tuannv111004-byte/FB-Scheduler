@@ -1,5 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
-import type { FacebookPage, NoteInput, PageInput, Post, PostInput, PostStatus, StickyNote } from './types'
+import type {
+  FacebookPage,
+  NoteInput,
+  PageInput,
+  Post,
+  PostInput,
+  PostStatus,
+  SourceInput,
+  SourceItem,
+  SourceType,
+  StickyNote,
+  ViaAccount,
+  ViaInput,
+  ViaLocation,
+  ViaStatus,
+} from './types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
@@ -67,6 +82,38 @@ type NoteRow = {
   updated_at: string
 }
 
+type ViaRow = {
+  id: string
+  account_name: string
+  account_link: string | null
+  account_password: string
+  display_name: string
+  two_factor_code: string
+  outlook_email: string
+  outlook_password: string
+  via_email: string
+  avatar_url: string | null
+  status: ViaStatus
+  location: ViaLocation
+  created_at: string
+  updated_at: string
+  page_vias?: Array<{
+    page_id: string
+  }>
+}
+
+type SourceRow = {
+  id: string
+  name: string
+  url: string
+  type: SourceType
+  description: string
+  notes: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
 function mapPageRow(row: PageRow): FacebookPage {
   return {
     id: row.id,
@@ -112,6 +159,40 @@ function mapNoteRow(row: NoteRow): StickyNote {
   }
 }
 
+function mapViaRow(row: ViaRow): ViaAccount {
+  return {
+    id: row.id,
+    accountName: row.account_name,
+    accountLink: row.account_link ?? '',
+    accountPassword: row.account_password,
+    displayName: row.display_name,
+    twoFactorCode: row.two_factor_code,
+    outlookEmail: row.outlook_email,
+    outlookPassword: row.outlook_password,
+    viaEmail: row.via_email,
+    avatarUrl: row.avatar_url ?? undefined,
+    status: row.status,
+    location: row.location,
+    pageIds: row.page_vias?.map((item) => item.page_id) ?? [],
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
+function mapSourceRow(row: SourceRow): SourceItem {
+  return {
+    id: row.id,
+    name: row.name,
+    url: row.url,
+    type: row.type,
+    description: row.description,
+    notes: row.notes,
+    isActive: row.is_active,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
 function pagePayload(input: PageInput) {
   return {
     name: input.name,
@@ -147,6 +228,35 @@ function notePayload(input: NoteInput) {
     content: input.content,
     color: input.color,
     sort_order: input.sortOrder,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function viaPayload(input: ViaInput) {
+  return {
+    account_name: input.accountName,
+    account_link: input.accountLink || null,
+    account_password: input.accountPassword,
+    display_name: input.displayName,
+    two_factor_code: input.twoFactorCode,
+    outlook_email: input.outlookEmail,
+    outlook_password: input.outlookPassword,
+    via_email: input.viaEmail,
+    avatar_url: input.avatarUrl || null,
+    status: input.status,
+    location: input.location,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function sourcePayload(input: SourceInput) {
+  return {
+    name: input.name,
+    url: input.url,
+    type: input.type,
+    description: input.description,
+    notes: input.notes,
+    is_active: input.isActive,
     updated_at: new Date().toISOString(),
   }
 }
@@ -257,6 +367,148 @@ export async function createNoteRemote(input: NoteInput) {
 
   if (error) throw error
   return mapNoteRow(data as NoteRow)
+}
+
+export async function fetchViasRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('vias')
+    .select('*, page_vias(page_id)')
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return (data as ViaRow[]).map(mapViaRow)
+}
+
+export async function fetchSourcesRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sources')
+    .select('*')
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return (data as SourceRow[]).map(mapSourceRow)
+}
+
+export async function createSourceRemote(input: SourceInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sources')
+    .insert(sourcePayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapSourceRow(data as SourceRow)
+}
+
+export async function updateSourceRemote(id: string, updates: Partial<SourceInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.name !== undefined) payload.name = updates.name
+  if (updates.url !== undefined) payload.url = updates.url
+  if (updates.type !== undefined) payload.type = updates.type
+  if (updates.description !== undefined) payload.description = updates.description
+  if (updates.notes !== undefined) payload.notes = updates.notes
+  if (updates.isActive !== undefined) payload.is_active = updates.isActive
+
+  const { data, error } = await client
+    .from('sources')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapSourceRow(data as SourceRow)
+}
+
+export async function deleteSourceRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('sources').delete().eq('id', id)
+  if (error) throw error
+}
+
+async function replaceViaPageLinks(viaId: string, pageIds: string[]) {
+  const client = requireSupabase()
+
+  const { error: deleteError } = await client.from('page_vias').delete().eq('via_id', viaId)
+  if (deleteError) throw deleteError
+
+  if (pageIds.length === 0) return
+
+  const { error: insertError } = await client.from('page_vias').insert(
+    pageIds.map((pageId) => ({
+      via_id: viaId,
+      page_id: pageId,
+    }))
+  )
+
+  if (insertError) throw insertError
+}
+
+export async function createViaRemote(input: ViaInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('vias')
+    .insert(viaPayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  const viaId = (data as ViaRow).id
+  await replaceViaPageLinks(viaId, input.pageIds)
+
+  const { data: refreshedData, error: refreshedError } = await client
+    .from('vias')
+    .select('*, page_vias(page_id)')
+    .eq('id', viaId)
+    .single()
+
+  if (refreshedError) throw refreshedError
+  return mapViaRow(refreshedData as ViaRow)
+}
+
+export async function updateViaRemote(id: string, updates: Partial<ViaInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.accountName !== undefined) payload.account_name = updates.accountName
+  if (updates.accountLink !== undefined) payload.account_link = updates.accountLink || null
+  if (updates.accountPassword !== undefined) payload.account_password = updates.accountPassword
+  if (updates.displayName !== undefined) payload.display_name = updates.displayName
+  if (updates.twoFactorCode !== undefined) payload.two_factor_code = updates.twoFactorCode
+  if (updates.outlookEmail !== undefined) payload.outlook_email = updates.outlookEmail
+  if (updates.outlookPassword !== undefined) payload.outlook_password = updates.outlookPassword
+  if (updates.viaEmail !== undefined) payload.via_email = updates.viaEmail
+  if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl || null
+  if (updates.status !== undefined) payload.status = updates.status
+  if (updates.location !== undefined) payload.location = updates.location
+
+  const { error } = await client.from('vias').update(payload).eq('id', id)
+  if (error) throw error
+
+  if (updates.pageIds !== undefined) {
+    await replaceViaPageLinks(id, updates.pageIds)
+  }
+
+  const { data: refreshedData, error: refreshedError } = await client
+    .from('vias')
+    .select('*, page_vias(page_id)')
+    .eq('id', id)
+    .single()
+
+  if (refreshedError) throw refreshedError
+  return mapViaRow(refreshedData as ViaRow)
+}
+
+export async function deleteViaRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('vias').delete().eq('id', id)
+  if (error) throw error
 }
 
 export async function updateNoteRemote(id: string, updates: Partial<NoteInput>) {

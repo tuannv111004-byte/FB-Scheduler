@@ -29,7 +29,7 @@ import { format, addDays, subDays } from 'date-fns'
 import type { Post } from '@/lib/types'
 
 const scheduleSettingsStorageKey = 'postops:schedule-settings'
-const defaultScheduleSlots = ['08:00', '15:00', '20:00', '23:00', '04:00'] as const
+const defaultScheduleSlots = ['08:00', '15:00', '20:00', '22:00', '04:00'] as const
 
 type ScheduleSettings = {
   selectedPageIds?: string[]
