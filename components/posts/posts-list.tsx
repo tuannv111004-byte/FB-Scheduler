@@ -59,6 +59,29 @@ const copyableImageType = 'image/png'
 const targetImageWidth = 1080
 const targetImageHeight = 1350
 const targetImageRatio = targetImageWidth / targetImageHeight
+const postsPreferencesStorageKey = 'postops:posts-preferences'
+
+type PostsPreferences = {
+  selectedDate?: string
+  filterPage?: string
+  filterStatus?: string
+  searchQuery?: string
+  zoomImagesOnHover?: boolean
+}
+
+function readPostsPreferences(): PostsPreferences {
+  if (typeof window === 'undefined') return {}
+
+  try {
+    const rawValue = window.localStorage.getItem(postsPreferencesStorageKey)
+    if (!rawValue) return {}
+
+    const parsedValue = JSON.parse(rawValue)
+    return parsedValue && typeof parsedValue === 'object' ? parsedValue : {}
+  } catch {
+    return {}
+  }
+}
 
 async function convertImageBlobToClipboardPng(imageBlob: Blob) {
   const imageUrl = URL.createObjectURL(imageBlob)
@@ -131,15 +154,37 @@ async function readBlobImageSize(imageBlob: Blob) {
 }
 
 export function PostsList() {
-  const { posts, pages, deletePost, duplicatePost, markAsPosted, selectedDate, setSelectedDate } = useAppStore()
+  const {
+    posts,
+    pages,
+    deletePost,
+    duplicatePost,
+    markAsPosted,
+    selectedDate: initialSelectedDate,
+  } = useAppStore()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [postToDelete, setPostToDelete] = useState<Post | null>(null)
-  const [filterPage, setFilterPage] = useState<string>('all')
-  const [filterStatus, setFilterStatus] = useState<string>('all')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [zoomImagesOnHover, setZoomImagesOnHover] = useState(false)
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const savedValue = readPostsPreferences().selectedDate
+    return typeof savedValue === 'string' && savedValue ? savedValue : initialSelectedDate
+  })
+  const [filterPage, setFilterPage] = useState<string>(() => {
+    const savedValue = readPostsPreferences().filterPage
+    return typeof savedValue === 'string' && savedValue ? savedValue : 'all'
+  })
+  const [filterStatus, setFilterStatus] = useState<string>(() => {
+    const savedValue = readPostsPreferences().filterStatus
+    return typeof savedValue === 'string' && savedValue ? savedValue : 'all'
+  })
+  const [searchQuery, setSearchQuery] = useState(() => {
+    const savedValue = readPostsPreferences().searchQuery
+    return typeof savedValue === 'string' ? savedValue : ''
+  })
+  const [zoomImagesOnHover, setZoomImagesOnHover] = useState(() => {
+    return readPostsPreferences().zoomImagesOnHover === true
+  })
   const [hoveredImage, setHoveredImage] = useState<{
     url: string
     top: number
@@ -250,15 +295,23 @@ export function PostsList() {
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
   useEffect(() => {
-    const savedValue = window.localStorage.getItem('postops:zoom-images-on-hover')
-    if (savedValue === 'true') {
-      setZoomImagesOnHover(true)
+    if (filterPage !== 'all' && !pages.some((page) => page.id === filterPage)) {
+      setFilterPage('all')
     }
-  }, [])
+  }, [filterPage, pages])
 
   useEffect(() => {
-    window.localStorage.setItem('postops:zoom-images-on-hover', String(zoomImagesOnHover))
-  }, [zoomImagesOnHover])
+    window.localStorage.setItem(
+      postsPreferencesStorageKey,
+      JSON.stringify({
+        selectedDate,
+        filterPage,
+        filterStatus,
+        searchQuery,
+        zoomImagesOnHover,
+      } satisfies PostsPreferences)
+    )
+  }, [filterPage, filterStatus, searchQuery, selectedDate, zoomImagesOnHover])
 
   return (
     <>

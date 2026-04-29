@@ -42,6 +42,19 @@ export interface Post extends PostInput {
   updatedAt: Date
 }
 
+export interface NoteInput {
+  title: string
+  content: string
+  color: string
+  sortOrder: number
+}
+
+export interface StickyNote extends NoteInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface Notification {
   id: string
   type: 'warning' | 'error' | 'info' | 'success'

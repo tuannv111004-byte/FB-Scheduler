@@ -29,6 +29,7 @@ import { format, addDays, subDays } from 'date-fns'
 import type { Post } from '@/lib/types'
 
 const scheduleSettingsStorageKey = 'postops:schedule-settings'
+const defaultScheduleSlots = ['08:00', '15:00', '20:00', '23:00', '04:00'] as const
 
 type ScheduleSettings = {
   selectedPageIds?: string[]
@@ -137,16 +138,21 @@ export function ScheduleBoard() {
       ? 'Pages 0 of 0'
       : `Pages ${visiblePageStart + 1}-${visiblePageEnd} of ${filteredPages.length}`
 
-  // Get all unique time slots across selected pages, sorted
-  const allTimeSlots = [...new Set(visiblePages.flatMap((p) => p.timeSlots))].sort()
+  const allTimeSlots = defaultScheduleSlots
 
   const now = new Date()
   const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
   const isToday = selectedDate === format(now, 'yyyy-MM-dd')
 
+  const getSlotDate = (timeSlot: string) => {
+    return timeSlot === '04:00'
+      ? format(addDays(new Date(selectedDate), 1), 'yyyy-MM-dd')
+      : selectedDate
+  }
+
   const getPostForSlot = (pageId: string, timeSlot: string) => {
     return posts.find(
-      (p) => p.pageId === pageId && p.postDate === selectedDate && p.timeSlot === timeSlot
+      (p) => p.pageId === pageId && p.postDate === getSlotDate(timeSlot) && p.timeSlot === timeSlot
     )
   }
 
@@ -248,6 +254,7 @@ export function ScheduleBoard() {
   }
 
   const isSlotPast = (timeSlot: string) => {
+    if (timeSlot === '04:00') return false
     return isToday && timeSlot < currentTime
   }
 
@@ -514,7 +521,7 @@ export function ScheduleBoard() {
                         isPast ? 'text-muted-foreground' : 'text-foreground'
                       )}
                     >
-                      {timeSlot}
+                      {timeSlot === '04:00' ? '04:00 (+1d)' : timeSlot}
                     </div>
 
                     {/* Page Columns */}
@@ -661,7 +668,7 @@ export function ScheduleBoard() {
         post={editingPost}
         defaultPageId={defaultSlot?.pageId}
         defaultTimeSlot={defaultSlot?.timeSlot}
-        defaultDate={selectedDate}
+        defaultDate={defaultSlot ? getSlotDate(defaultSlot.timeSlot) : selectedDate}
       />
     </>
   )

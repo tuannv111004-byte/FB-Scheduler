@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import type { FacebookPage, PageInput, Post, PostInput, PostStatus } from './types'
+import type { FacebookPage, NoteInput, PageInput, Post, PostInput, PostStatus, StickyNote } from './types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
@@ -57,6 +57,16 @@ type PostRow = {
   updated_at: string
 }
 
+type NoteRow = {
+  id: string
+  title: string
+  content: string
+  color: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
 function mapPageRow(row: PageRow): FacebookPage {
   return {
     id: row.id,
@@ -90,6 +100,18 @@ function mapPostRow(row: PostRow): Post {
   }
 }
 
+function mapNoteRow(row: NoteRow): StickyNote {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    color: row.color,
+    sortOrder: row.sort_order,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
 function pagePayload(input: PageInput) {
   return {
     name: input.name,
@@ -115,6 +137,16 @@ function postPayload(input: PostInput) {
     ads_link: input.adsLink || null,
     status: input.status,
     notes: input.notes || null,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function notePayload(input: NoteInput) {
+  return {
+    title: input.title,
+    content: input.content,
+    color: input.color,
+    sort_order: input.sortOrder,
     updated_at: new Date().toISOString(),
   }
 }
@@ -201,6 +233,56 @@ export async function createPostRemote(input: PostInput) {
 
   if (error) throw error
   return mapPostRow(data as PostRow)
+}
+
+export async function fetchNotesRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('notes')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return (data as NoteRow[]).map(mapNoteRow)
+}
+
+export async function createNoteRemote(input: NoteInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('notes')
+    .insert(notePayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapNoteRow(data as NoteRow)
+}
+
+export async function updateNoteRemote(id: string, updates: Partial<NoteInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.title !== undefined) payload.title = updates.title
+  if (updates.content !== undefined) payload.content = updates.content
+  if (updates.color !== undefined) payload.color = updates.color
+  if (updates.sortOrder !== undefined) payload.sort_order = updates.sortOrder
+
+  const { data, error } = await client
+    .from('notes')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapNoteRow(data as NoteRow)
+}
+
+export async function deleteNoteRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('notes').delete().eq('id', id)
+  if (error) throw error
 }
 
 export async function updatePostRemote(id: string, updates: Partial<PostInput>) {
