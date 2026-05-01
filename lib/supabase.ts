@@ -147,6 +147,7 @@ type PosterLabSequelRow = {
   synopsis: string
   visual_hook: string
   prompt: string
+  caption: string | null
   is_used: boolean
   created_at: string
   updated_at: string
@@ -261,6 +262,7 @@ function mapPosterLabSequelRow(row: PosterLabSequelRow): PosterLabSequel {
     synopsis: row.synopsis,
     visualHook: row.visual_hook,
     prompt: row.prompt,
+    caption: row.caption ?? '',
     isUsed: row.is_used,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -362,6 +364,7 @@ function posterLabSequelPayload(input: PosterLabSequelInput) {
     synopsis: input.synopsis,
     visual_hook: input.visualHook,
     prompt: input.prompt,
+    caption: input.caption,
     is_used: input.isUsed,
     updated_at: new Date().toISOString(),
   }
@@ -511,13 +514,27 @@ export async function createSourceRemote(input: SourceInput) {
 
 export async function fetchPosterLabFranchisesRemote() {
   const client = requireSupabase()
-  const { data, error } = await client
-    .from('poster_lab_franchises')
-    .select('*')
-    .order('updated_at', { ascending: false })
+  const pageSize = 1000
+  const rows: PosterLabFranchiseRow[] = []
 
-  if (error) throw error
-  return (data as PosterLabFranchiseRow[]).map(mapPosterLabFranchiseRow)
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client
+      .from('poster_lab_franchises')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .range(from, from + pageSize - 1)
+
+    if (error) throw error
+
+    const page = (data as PosterLabFranchiseRow[] | null) ?? []
+    rows.push(...page)
+
+    if (page.length < pageSize) {
+      break
+    }
+  }
+
+  return rows.map(mapPosterLabFranchiseRow)
 }
 
 export async function createPosterLabFranchiseRemote(input: PosterLabFranchiseInput) {
@@ -569,50 +586,89 @@ export async function deletePosterLabFranchiseRemote(id: string) {
   if (error) throw error
 }
 
+export async function deletePosterLabFranchisesRemote() {
+  const client = requireSupabase()
+  const { error } = await client.from('poster_lab_franchises').delete().not('id', 'is', null)
+  if (error) throw error
+}
+
 export async function createPosterLabFranchisesBulkRemote(items: PosterLabTmdbCandidate[]) {
   if (items.length === 0) {
     return [] as PosterLabFranchise[]
   }
 
   const client = requireSupabase()
-  const tmdbMovieIds = items.map((item) => item.tmdbMovieId)
+  const chunkSize = 500
+  const tmdbMovieIds = Array.from(new Set(items.map((item) => item.tmdbMovieId)))
+  const existingRows: Array<{ tmdb_movie_id: number | null }> = []
 
-  const { data: existingRows, error: existingError } = await client
-    .from('poster_lab_franchises')
-    .select('tmdb_movie_id')
-    .in('tmdb_movie_id', tmdbMovieIds)
+  for (let index = 0; index < tmdbMovieIds.length; index += chunkSize) {
+    const ids = tmdbMovieIds.slice(index, index + chunkSize)
+    const { data, error } = await client
+      .from('poster_lab_franchises')
+      .select('tmdb_movie_id')
+      .in('tmdb_movie_id', ids)
 
-  if (existingError) throw existingError
+    if (error) throw error
+    existingRows.push(...(((data as Array<{ tmdb_movie_id: number | null }> | null) ?? [])))
+  }
 
   const existingIds = new Set(
-    ((existingRows as Array<{ tmdb_movie_id: number | null }> | null) ?? [])
+    existingRows
       .map((row) => row.tmdb_movie_id)
       .filter((value): value is number => typeof value === 'number')
   )
 
-  const uniqueItems = items.filter((item) => !existingIds.has(item.tmdbMovieId))
+  const seenIds = new Set<number>()
+  const uniqueItems = items.filter((item) => {
+    if (existingIds.has(item.tmdbMovieId) || seenIds.has(item.tmdbMovieId)) {
+      return false
+    }
+    seenIds.add(item.tmdbMovieId)
+    return true
+  })
   if (uniqueItems.length === 0) {
     return [] as PosterLabFranchise[]
   }
 
-  const { data, error } = await client
-    .from('poster_lab_franchises')
-    .insert(uniqueItems.map((item) => posterLabFranchisePayload(item)))
-    .select('*')
+  const createdRows: PosterLabFranchiseRow[] = []
+  for (let index = 0; index < uniqueItems.length; index += chunkSize) {
+    const chunk = uniqueItems.slice(index, index + chunkSize)
+    const { data, error } = await client
+      .from('poster_lab_franchises')
+      .insert(chunk.map((item) => posterLabFranchisePayload(item)))
+      .select('*')
 
-  if (error) throw error
-  return (data as PosterLabFranchiseRow[]).map(mapPosterLabFranchiseRow)
+    if (error) throw error
+    createdRows.push(...(((data as PosterLabFranchiseRow[] | null) ?? [])))
+  }
+
+  return createdRows.map(mapPosterLabFranchiseRow)
 }
 
 export async function fetchPosterLabSequelsRemote() {
   const client = requireSupabase()
-  const { data, error } = await client
-    .from('poster_lab_sequels')
-    .select('*')
-    .order('updated_at', { ascending: false })
+  const pageSize = 1000
+  const rows: PosterLabSequelRow[] = []
 
-  if (error) throw error
-  return (data as PosterLabSequelRow[]).map(mapPosterLabSequelRow)
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client
+      .from('poster_lab_sequels')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .range(from, from + pageSize - 1)
+
+    if (error) throw error
+
+    const page = (data as PosterLabSequelRow[] | null) ?? []
+    rows.push(...page)
+
+    if (page.length < pageSize) {
+      break
+    }
+  }
+
+  return rows.map(mapPosterLabSequelRow)
 }
 
 export async function createPosterLabSequelRemote(input: PosterLabSequelInput) {
@@ -627,6 +683,21 @@ export async function createPosterLabSequelRemote(input: PosterLabSequelInput) {
   return mapPosterLabSequelRow(data as PosterLabSequelRow)
 }
 
+export async function createPosterLabSequelsBulkRemote(items: PosterLabSequelInput[]) {
+  if (items.length === 0) {
+    return [] as PosterLabSequel[]
+  }
+
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('poster_lab_sequels')
+    .insert(items.map((item) => posterLabSequelPayload(item)))
+    .select('*')
+
+  if (error) throw error
+  return (data as PosterLabSequelRow[]).map(mapPosterLabSequelRow)
+}
+
 export async function updatePosterLabSequelRemote(id: string, updates: Partial<PosterLabSequelInput>) {
   const client = requireSupabase()
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -638,6 +709,7 @@ export async function updatePosterLabSequelRemote(id: string, updates: Partial<P
   if (updates.synopsis !== undefined) payload.synopsis = updates.synopsis
   if (updates.visualHook !== undefined) payload.visual_hook = updates.visualHook
   if (updates.prompt !== undefined) payload.prompt = updates.prompt
+  if (updates.caption !== undefined) payload.caption = updates.caption
   if (updates.isUsed !== undefined) payload.is_used = updates.isUsed
 
   const { data, error } = await client
@@ -654,6 +726,16 @@ export async function updatePosterLabSequelRemote(id: string, updates: Partial<P
 export async function deletePosterLabSequelRemote(id: string) {
   const client = requireSupabase()
   const { error } = await client.from('poster_lab_sequels').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function deletePosterLabSequelsRemote(franchiseId?: string) {
+  const client = requireSupabase()
+  const query = client.from('poster_lab_sequels').delete()
+  const { error } = franchiseId
+    ? await query.eq('franchise_id', franchiseId)
+    : await query.not('id', 'is', null)
+
   if (error) throw error
 }
 

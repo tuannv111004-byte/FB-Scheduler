@@ -34,6 +34,7 @@ const emptySequelInput: PosterLabSequelInput = {
   synopsis: '',
   visualHook: '',
   prompt: '',
+  caption: '',
   isUsed: false,
 }
 
@@ -60,6 +61,7 @@ export function SequelModal({
         synopsis: sequel.synopsis,
         visualHook: sequel.visualHook,
         prompt: sequel.prompt,
+        caption: sequel.caption,
         isUsed: sequel.isUsed,
       })
       return
@@ -80,6 +82,7 @@ export function SequelModal({
       synopsis: formData.synopsis.trim(),
       visualHook: formData.visualHook.trim(),
       prompt: formData.prompt.trim(),
+      caption: formData.caption.trim(),
     })
   }
 
@@ -198,6 +201,19 @@ export function SequelModal({
                 setFormData((current) => ({ ...current, prompt: event.target.value }))
               }
               placeholder="Optional image prompt"
+              rows={5}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sequel-caption">Caption</Label>
+            <Textarea
+              id="sequel-caption"
+              value={formData.caption}
+              onChange={(event) =>
+                setFormData((current) => ({ ...current, caption: event.target.value }))
+              }
+              placeholder="Realistic, engaging poster caption with rating, curiosity hook, and hashtags"
               rows={5}
             />
           </div>

@@ -33,6 +33,7 @@ export function mapTmdbGenreToPosterLab(genreNames: string[]): PosterLabGenre {
 export function buildTmdbCandidate(input: {
   movieId: number
   title: string
+  franchiseName?: string
   genreIds: number[]
   genreMap: Map<number, string>
   releaseDate?: string
@@ -42,9 +43,10 @@ export function buildTmdbCandidate(input: {
   categoryLabel: string
 }): PosterLabTmdbCandidate {
   const genreNames = input.genreIds.map((genreId) => input.genreMap.get(genreId)).filter(Boolean) as string[]
+  const franchiseName = (input.franchiseName || input.title).replace(/\s+Collection$/i, '').trim()
 
   return {
-    franchiseName: input.title,
+    franchiseName,
     latestOfficialTitle: input.title,
     genre: mapTmdbGenreToPosterLab(genreNames),
     notes: '',

@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -48,11 +49,13 @@ import {
   Image as ImageIcon,
   ExternalLink,
   Search,
+  ChevronDown,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/status-badge'
 import { PostModal } from './post-modal'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import type { Post, PostStatus } from '@/lib/types'
 
 const copyableImageType = 'image/png'
@@ -64,9 +67,11 @@ const postsPreferencesStorageKey = 'postops:posts-preferences'
 type PostsPreferences = {
   selectedDate?: string
   filterPage?: string
+  filterPageIds?: string[]
   filterStatus?: string
   searchQuery?: string
   zoomImagesOnHover?: boolean
+  highlightWindowMinutes?: number
 }
 
 function readPostsPreferences(): PostsPreferences {
@@ -153,6 +158,24 @@ async function readBlobImageSize(imageBlob: Blob) {
   }
 }
 
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseTimeSlotMinutes(timeSlot: string) {
+  const match = timeSlot.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return hours * 60 + minutes
+}
+
 export function PostsList() {
   const {
     posts,
@@ -170,9 +193,15 @@ export function PostsList() {
     const savedValue = readPostsPreferences().selectedDate
     return typeof savedValue === 'string' && savedValue ? savedValue : initialSelectedDate
   })
-  const [filterPage, setFilterPage] = useState<string>(() => {
-    const savedValue = readPostsPreferences().filterPage
-    return typeof savedValue === 'string' && savedValue ? savedValue : 'all'
+  const [filterPageIds, setFilterPageIds] = useState<string[]>(() => {
+    const preferences = readPostsPreferences()
+    if (Array.isArray(preferences.filterPageIds)) {
+      return preferences.filterPageIds.filter((id) => typeof id === 'string')
+    }
+
+    return typeof preferences.filterPage === 'string' && preferences.filterPage !== 'all'
+      ? [preferences.filterPage]
+      : []
   })
   const [filterStatus, setFilterStatus] = useState<string>(() => {
     const savedValue = readPostsPreferences().filterStatus
@@ -185,6 +214,13 @@ export function PostsList() {
   const [zoomImagesOnHover, setZoomImagesOnHover] = useState(() => {
     return readPostsPreferences().zoomImagesOnHover === true
   })
+  const [highlightWindowMinutes, setHighlightWindowMinutes] = useState(() => {
+    const savedValue = readPostsPreferences().highlightWindowMinutes
+    return typeof savedValue === 'number' && Number.isFinite(savedValue)
+      ? Math.min(Math.max(savedValue, 0), 240)
+      : 30
+  })
+  const [currentTime, setCurrentTime] = useState(() => new Date())
   const [hoveredImage, setHoveredImage] = useState<{
     url: string
     top: number
@@ -287,9 +323,32 @@ export function PostsList() {
     }
   }
 
+  const selectedPageIdSet = new Set(filterPageIds)
+  const allPagesSelected = pages.length > 0 && filterPageIds.length === pages.length
+  const pageFilterLabel =
+    filterPageIds.length === 0 || allPagesSelected
+      ? 'All Pages'
+      : filterPageIds.length === 1
+      ? pages.find((page) => page.id === filterPageIds[0])?.name ?? '1 Page'
+      : `${filterPageIds.length} Pages`
+
+  const toggleAllPages = () => {
+    setFilterPageIds([])
+  }
+
+  const togglePageFilter = (pageId: string) => {
+    setFilterPageIds((current) => {
+      if (current.includes(pageId)) {
+        return current.filter((id) => id !== pageId)
+      }
+
+      return [...current, pageId]
+    })
+  }
+
   const filteredPosts = posts.filter((post) => {
     if (post.postDate !== selectedDate) return false
-    if (filterPage !== 'all' && post.pageId !== filterPage) return false
+    if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
     if (filterStatus !== 'all' && post.status !== filterStatus) return false
     if (searchQuery && !post.caption.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
@@ -297,24 +356,48 @@ export function PostsList() {
 
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
-  useEffect(() => {
-    if (filterPage !== 'all' && !pages.some((page) => page.id === filterPage)) {
-      setFilterPage('all')
+  const getTimeHighlightState = (post: Post) => {
+    if (highlightWindowMinutes <= 0 || post.postDate !== formatLocalDate(currentTime)) {
+      return null
     }
-  }, [filterPage, pages])
+
+    const slotMinutes = parseTimeSlotMinutes(post.timeSlot)
+    if (slotMinutes === null) {
+      return null
+    }
+
+    const nowMinutes = currentTime.getHours() * 60 + currentTime.getMinutes()
+    const diffMinutes = slotMinutes - nowMinutes
+    if (Math.abs(diffMinutes) > highlightWindowMinutes) {
+      return null
+    }
+
+    return diffMinutes >= 0 ? 'upcoming' : 'current'
+  }
+
+  useEffect(() => {
+    setFilterPageIds((current) => current.filter((id) => pages.some((page) => page.id === id)))
+  }, [pages])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(new Date()), 60000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     window.localStorage.setItem(
       postsPreferencesStorageKey,
-      JSON.stringify({
-        selectedDate,
-        filterPage,
-        filterStatus,
-        searchQuery,
-        zoomImagesOnHover,
-      } satisfies PostsPreferences)
-    )
-  }, [filterPage, filterStatus, searchQuery, selectedDate, zoomImagesOnHover])
+        JSON.stringify({
+          selectedDate,
+          filterPage: filterPageIds.length === 1 ? filterPageIds[0] : 'all',
+          filterPageIds,
+          filterStatus,
+          searchQuery,
+          zoomImagesOnHover,
+          highlightWindowMinutes,
+        } satisfies PostsPreferences)
+      )
+  }, [filterPageIds, filterStatus, highlightWindowMinutes, searchQuery, selectedDate, zoomImagesOnHover])
 
   return (
     <>
@@ -344,19 +427,32 @@ export function PostsList() {
               onChange={(e) => setSelectedDate(e.target.value)}
               className="w-40"
             />
-            <Select value={filterPage} onValueChange={setFilterPage}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="All Pages" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Pages</SelectItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-44 justify-between">
+                  <span className="truncate">{pageFilterLabel}</span>
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-80 w-56 overflow-y-auto border-border bg-popover">
+                <DropdownMenuCheckboxItem
+                  checked={filterPageIds.length === 0 || allPagesSelected}
+                  onCheckedChange={toggleAllPages}
+                >
+                  All Pages
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator className="bg-border" />
                 {pages.map((page) => (
-                  <SelectItem key={page.id} value={page.id}>
+                  <DropdownMenuCheckboxItem
+                    key={page.id}
+                    checked={selectedPageIdSet.has(page.id)}
+                    onCheckedChange={() => togglePageFilter(page.id)}
+                  >
                     {page.name}
-                  </SelectItem>
+                  </DropdownMenuCheckboxItem>
                 ))}
-              </SelectContent>
-            </Select>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
               <SelectTrigger className="w-32">
                 <SelectValue placeholder="All Status" />
@@ -378,6 +474,24 @@ export function PostsList() {
                 id="zoom-images"
                 checked={zoomImagesOnHover}
                 onCheckedChange={setZoomImagesOnHover}
+              />
+            </div>
+            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+              <Label htmlFor="time-highlight-window" className="whitespace-nowrap text-xs text-muted-foreground">
+                Highlight +/- min
+              </Label>
+              <Input
+                id="time-highlight-window"
+                type="number"
+                min={0}
+                max={240}
+                value={highlightWindowMinutes}
+                onChange={(event) =>
+                  setHighlightWindowMinutes(
+                    Math.min(Math.max(Number(event.target.value) || 0, 0), 240)
+                  )
+                }
+                className="h-7 w-16 px-2 text-xs"
               />
             </div>
           </div>
@@ -404,12 +518,18 @@ export function PostsList() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredPosts.map((post) => (
+                  filteredPosts.map((post) => {
+                    const timeHighlightState = getTimeHighlightState(post)
+                    const isTimeHighlighted = timeHighlightState !== null
+
+                    return (
                     <TableRow
                       key={post.id}
                       className={`border-border transition-colors ${
                         highlightedPostId === post.id
                           ? 'bg-primary/8 shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/12'
+                          : isTimeHighlighted
+                          ? 'bg-amber-500/10 shadow-[inset_3px_0_0_rgb(245_158_11)] hover:bg-amber-500/15'
                           : 'hover:bg-accent/20'
                       }`}
                     >
@@ -471,7 +591,25 @@ export function PostsList() {
                           )
                         })()}
                       </TableCell>
-                      <TableCell className="text-foreground">{post.timeSlot}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            isTimeHighlighted
+                              ? 'border-amber-400/50 bg-amber-400/15 font-mono text-amber-300 shadow-[inset_0_0_0_1px_rgb(251_191_36_/_0.16)]'
+                              : 'border-primary/30 bg-primary/10 font-mono text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.08)]'
+                          }
+                          title={
+                            isTimeHighlighted
+                              ? timeHighlightState === 'upcoming'
+                                ? 'Upcoming highlighted time slot'
+                                : 'Current highlighted time slot'
+                              : undefined
+                          }
+                        >
+                          {post.timeSlot}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="max-w-48">
                         <button
                           type="button"
@@ -565,7 +703,8 @@ export function PostsList() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                    )
+                  })
                 )}
               </TableBody>
             </Table>

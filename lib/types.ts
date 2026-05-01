@@ -154,6 +154,9 @@ export interface PosterLabTmdbDiscoverRequest {
   maxResults: number
   sortBy: PosterLabImportSort
   minVoteCount: number
+  existingTmdbMovieIds?: number[]
+  includeExisting?: boolean
+  includeStandalone?: boolean
 }
 
 export interface PosterLabSequelInput {
@@ -164,6 +167,7 @@ export interface PosterLabSequelInput {
   synopsis: string
   visualHook: string
   prompt: string
+  caption: string
   isUsed: boolean
 }
 

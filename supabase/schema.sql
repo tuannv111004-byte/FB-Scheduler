@@ -117,10 +117,13 @@ create table if not exists poster_lab_sequels (
   synopsis text not null default '',
   visual_hook text not null default '',
   prompt text not null default '',
+  caption text not null default '',
   is_used boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table poster_lab_sequels add column if not exists caption text not null default '';
 
 create index if not exists poster_lab_franchises_genre_idx on poster_lab_franchises(genre);
 create unique index if not exists poster_lab_franchises_tmdb_movie_id_idx

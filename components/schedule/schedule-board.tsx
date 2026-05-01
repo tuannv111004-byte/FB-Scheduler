@@ -39,6 +39,7 @@ type ScheduleSettings = {
   zebraIntensity?: number
   pageGroupSize?: number
   showAllPages?: boolean
+  pageGroupIndex?: number
 }
 
 function readScheduleSettings(): ScheduleSettings {
@@ -102,7 +103,10 @@ export function ScheduleBoard() {
     return String(typeof savedValue === 'number' ? Math.max(1, Math.floor(savedValue)) : 4)
   })
   const [showAllPages, setShowAllPages] = useState(() => readScheduleSettings().showAllPages === true)
-  const [pageGroupIndex, setPageGroupIndex] = useState(0)
+  const [pageGroupIndex, setPageGroupIndex] = useState(() => {
+    const savedValue = readScheduleSettings().pageGroupIndex
+    return typeof savedValue === 'number' ? Math.max(0, Math.floor(savedValue)) : 0
+  })
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [defaultSlot, setDefaultSlot] = useState<{ pageId: string; timeSlot: string } | null>(null)
@@ -300,6 +304,7 @@ export function ScheduleBoard() {
         zebraIntensity,
         pageGroupSize,
         showAllPages,
+        pageGroupIndex,
       } satisfies ScheduleSettings)
     )
   }, [
@@ -310,6 +315,7 @@ export function ScheduleBoard() {
     zebraIntensity,
     pageGroupSize,
     showAllPages,
+    pageGroupIndex,
   ])
 
   return (
