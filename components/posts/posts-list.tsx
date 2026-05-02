@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -68,9 +68,12 @@ type PostsPreferences = {
   selectedDate?: string
   filterPage?: string
   filterPageIds?: string[]
+  filterTimeSlots?: string[]
   filterStatus?: string
   searchQuery?: string
   zoomImagesOnHover?: boolean
+  highlightTargetTime?: string
+  highlightTargetTimes?: string[]
   highlightWindowMinutes?: number
 }
 
@@ -158,13 +161,6 @@ async function readBlobImageSize(imageBlob: Blob) {
   }
 }
 
-function formatLocalDate(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 function parseTimeSlotMinutes(timeSlot: string) {
   const match = timeSlot.match(/^(\d{1,2}):(\d{2})$/)
   if (!match) return null
@@ -174,6 +170,20 @@ function parseTimeSlotMinutes(timeSlot: string) {
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
 
   return hours * 60 + minutes
+}
+
+function addOneDay(dateValue: string) {
+  const date = new Date(`${dateValue}T00:00:00`)
+  date.setDate(date.getDate() + 1)
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getDisplayDateForTimeSlot(selectedDate: string, timeSlot: string) {
+  return timeSlot === '04:00' ? addOneDay(selectedDate) : selectedDate
 }
 
 export function PostsList() {
@@ -207,6 +217,12 @@ export function PostsList() {
     const savedValue = readPostsPreferences().filterStatus
     return typeof savedValue === 'string' && savedValue ? savedValue : 'all'
   })
+  const [filterTimeSlots, setFilterTimeSlots] = useState<string[]>(() => {
+    const savedValue = readPostsPreferences().filterTimeSlots
+    return Array.isArray(savedValue)
+      ? savedValue.filter((slot) => typeof slot === 'string' && parseTimeSlotMinutes(slot) !== null)
+      : []
+  })
   const [searchQuery, setSearchQuery] = useState(() => {
     const savedValue = readPostsPreferences().searchQuery
     return typeof savedValue === 'string' ? savedValue : ''
@@ -220,7 +236,19 @@ export function PostsList() {
       ? Math.min(Math.max(savedValue, 0), 240)
       : 30
   })
-  const [currentTime, setCurrentTime] = useState(() => new Date())
+  const [highlightTargetTimes, setHighlightTargetTimes] = useState<string[]>(() => {
+    const preferences = readPostsPreferences()
+    if (Array.isArray(preferences.highlightTargetTimes)) {
+      return preferences.highlightTargetTimes.filter(
+        (slot) => typeof slot === 'string' && parseTimeSlotMinutes(slot) !== null
+      )
+    }
+
+    return typeof preferences.highlightTargetTime === 'string' &&
+      parseTimeSlotMinutes(preferences.highlightTargetTime) !== null
+      ? [preferences.highlightTargetTime]
+      : []
+  })
   const [hoveredImage, setHoveredImage] = useState<{
     url: string
     top: number
@@ -323,14 +351,40 @@ export function PostsList() {
     }
   }
 
-  const selectedPageIdSet = new Set(filterPageIds)
+  const selectedPageIdSet = useMemo(() => new Set(filterPageIds), [filterPageIds])
+  const selectedTimeSlotSet = useMemo(() => new Set(filterTimeSlots), [filterTimeSlots])
+  const selectedHighlightTimeSet = useMemo(() => new Set(highlightTargetTimes), [highlightTargetTimes])
   const allPagesSelected = pages.length > 0 && filterPageIds.length === pages.length
+  const highlightTimeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          pages
+            .filter((page) => filterPageIds.length === 0 || selectedPageIdSet.has(page.id))
+            .flatMap((page) => page.timeSlots)
+            .filter((slot) => parseTimeSlotMinutes(slot) !== null)
+        )
+      ).sort((first, second) => (parseTimeSlotMinutes(first) ?? 0) - (parseTimeSlotMinutes(second) ?? 0)),
+    [filterPageIds.length, pages, selectedPageIdSet]
+  )
   const pageFilterLabel =
     filterPageIds.length === 0 || allPagesSelected
       ? 'All Pages'
       : filterPageIds.length === 1
       ? pages.find((page) => page.id === filterPageIds[0])?.name ?? '1 Page'
       : `${filterPageIds.length} Pages`
+  const timeSlotFilterLabel =
+    filterTimeSlots.length === 0 || filterTimeSlots.length === highlightTimeOptions.length
+      ? 'All Slots'
+      : filterTimeSlots.length === 1
+      ? filterTimeSlots[0]
+      : `${filterTimeSlots.length} Slots`
+  const highlightTimeLabel =
+    highlightTargetTimes.length === 0
+      ? 'No Highlight'
+      : highlightTargetTimes.length === 1
+      ? highlightTargetTimes[0]
+      : `${highlightTargetTimes.length} Highlights`
 
   const toggleAllPages = () => {
     setFilterPageIds([])
@@ -346,9 +400,38 @@ export function PostsList() {
     })
   }
 
+  const toggleAllTimeSlots = () => {
+    setFilterTimeSlots([])
+  }
+
+  const toggleTimeSlotFilter = (timeSlot: string) => {
+    setFilterTimeSlots((current) => {
+      if (current.includes(timeSlot)) {
+        return current.filter((slot) => slot !== timeSlot)
+      }
+
+      return [...current, timeSlot]
+    })
+  }
+
+  const clearHighlightTimes = () => {
+    setHighlightTargetTimes([])
+  }
+
+  const toggleHighlightTime = (timeSlot: string) => {
+    setHighlightTargetTimes((current) => {
+      if (current.includes(timeSlot)) {
+        return current.filter((slot) => slot !== timeSlot)
+      }
+
+      return [...current, timeSlot]
+    })
+  }
+
   const filteredPosts = posts.filter((post) => {
-    if (post.postDate !== selectedDate) return false
+    if (post.postDate !== getDisplayDateForTimeSlot(selectedDate, post.timeSlot)) return false
     if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
+    if (filterTimeSlots.length > 0 && !selectedTimeSlotSet.has(post.timeSlot)) return false
     if (filterStatus !== 'all' && post.status !== filterStatus) return false
     if (searchQuery && !post.caption.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
@@ -357,21 +440,27 @@ export function PostsList() {
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
   const getTimeHighlightState = (post: Post) => {
-    if (highlightWindowMinutes <= 0 || post.postDate !== formatLocalDate(currentTime)) {
+    if (highlightWindowMinutes <= 0) {
       return null
     }
 
     const slotMinutes = parseTimeSlotMinutes(post.timeSlot)
-    if (slotMinutes === null) {
+    if (slotMinutes === null || highlightTargetTimes.length === 0) {
       return null
     }
 
-    const nowMinutes = currentTime.getHours() * 60 + currentTime.getMinutes()
-    const diffMinutes = slotMinutes - nowMinutes
-    if (Math.abs(diffMinutes) > highlightWindowMinutes) {
+    const matchingDiffs = highlightTargetTimes
+      .map((targetTime) => {
+        const targetMinutes = parseTimeSlotMinutes(targetTime)
+        return targetMinutes === null ? null : slotMinutes - targetMinutes
+      })
+      .filter((diff): diff is number => diff !== null && Math.abs(diff) <= highlightWindowMinutes)
+
+    if (matchingDiffs.length === 0) {
       return null
     }
 
+    const diffMinutes = matchingDiffs.sort((first, second) => Math.abs(first) - Math.abs(second))[0]
     return diffMinutes >= 0 ? 'upcoming' : 'current'
   }
 
@@ -380,9 +469,12 @@ export function PostsList() {
   }, [pages])
 
   useEffect(() => {
-    const interval = window.setInterval(() => setCurrentTime(new Date()), 60000)
-    return () => window.clearInterval(interval)
-  }, [])
+    setFilterTimeSlots((current) => current.filter((slot) => highlightTimeOptions.includes(slot)))
+  }, [highlightTimeOptions])
+
+  useEffect(() => {
+    setHighlightTargetTimes((current) => current.filter((slot) => highlightTimeOptions.includes(slot)))
+  }, [highlightTimeOptions])
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -391,13 +483,24 @@ export function PostsList() {
           selectedDate,
           filterPage: filterPageIds.length === 1 ? filterPageIds[0] : 'all',
           filterPageIds,
+          filterTimeSlots,
           filterStatus,
           searchQuery,
           zoomImagesOnHover,
+          highlightTargetTimes,
           highlightWindowMinutes,
         } satisfies PostsPreferences)
       )
-  }, [filterPageIds, filterStatus, highlightWindowMinutes, searchQuery, selectedDate, zoomImagesOnHover])
+  }, [
+    filterPageIds,
+    filterStatus,
+    filterTimeSlots,
+    highlightTargetTimes,
+    highlightWindowMinutes,
+    searchQuery,
+    selectedDate,
+    zoomImagesOnHover,
+  ])
 
   return (
     <>
@@ -466,6 +569,32 @@ export function PostsList() {
                 ))}
               </SelectContent>
             </Select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-36 justify-between">
+                  <span className="truncate">{timeSlotFilterLabel}</span>
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-80 w-44 overflow-y-auto border-border bg-popover">
+                <DropdownMenuCheckboxItem
+                  checked={filterTimeSlots.length === 0 || filterTimeSlots.length === highlightTimeOptions.length}
+                  onCheckedChange={toggleAllTimeSlots}
+                >
+                  All Slots
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator className="bg-border" />
+                {highlightTimeOptions.map((slot) => (
+                  <DropdownMenuCheckboxItem
+                    key={slot}
+                    checked={selectedTimeSlotSet.has(slot)}
+                    onCheckedChange={() => toggleTimeSlotFilter(slot)}
+                  >
+                    {slot}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div className="ml-auto flex items-center gap-2 rounded-md border border-border px-3 py-2">
               <Label htmlFor="zoom-images" className="text-xs text-muted-foreground">
                 Zoom image hover
@@ -475,6 +604,37 @@ export function PostsList() {
                 checked={zoomImagesOnHover}
                 onCheckedChange={setZoomImagesOnHover}
               />
+            </div>
+            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+              <Label className="whitespace-nowrap text-xs text-muted-foreground">
+                Highlight time
+              </Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="h-7 w-36 justify-between px-2 text-xs">
+                    <span className="truncate">{highlightTimeLabel}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-80 w-44 overflow-y-auto border-border bg-popover">
+                  <DropdownMenuCheckboxItem
+                    checked={highlightTargetTimes.length === 0}
+                    onCheckedChange={clearHighlightTimes}
+                  >
+                    No Highlight
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator className="bg-border" />
+                  {highlightTimeOptions.map((slot) => (
+                    <DropdownMenuCheckboxItem
+                      key={slot}
+                      checked={selectedHighlightTimeSet.has(slot)}
+                      onCheckedChange={() => toggleHighlightTime(slot)}
+                    >
+                      {slot}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
               <Label htmlFor="time-highlight-window" className="whitespace-nowrap text-xs text-muted-foreground">
@@ -608,6 +768,9 @@ export function PostsList() {
                           }
                         >
                           {post.timeSlot}
+                          {post.timeSlot === '04:00' && post.postDate === addOneDay(selectedDate)
+                            ? ' (+1d)'
+                            : ''}
                         </Badge>
                       </TableCell>
                       <TableCell className="max-w-48">

@@ -546,7 +546,7 @@ export function ScheduleBoard() {
                             draggedPageId === page.id && 'relative z-10 scale-[1.01] bg-accent/30 shadow-md ring-1 ring-primary/20'
                           )}
                         >
-                            <div className="flex h-full min-h-20 items-center justify-center rounded-md border border-dashed border-border/70 bg-card text-xs text-muted-foreground shadow-xs">
+                            <div className="flex h-full min-h-20 items-center justify-center rounded-md border border-dashed border-border/40 bg-muted/45 text-xs text-muted-foreground/55 shadow-inner">
                               No slot
                             </div>
                           </div>
