@@ -11,6 +11,7 @@ import {
   List,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Rows3,
   Search,
   Sparkles,
@@ -544,11 +545,26 @@ export function PosterLabManager() {
     () => (showImportedCandidates ? discoveredCandidates : importableCandidates),
     [discoveredCandidates, importableCandidates, showImportedCandidates]
   )
+  const hasTmdbCrawlResults =
+    discoveredCandidates.length > 0 ||
+    selectedCandidateIds.length > 0 ||
+    scannedPageCount > 0 ||
+    skippedExistingCount > 0 ||
+    skippedSingleCount > 0 ||
+    tmdbError !== null
 
   const updateSelectedCandidateIds = (value: number[] | ((current: number[]) => number[])) => {
     const current = getTmdbCrawlState().selectedCandidateIds
     const next = typeof value === 'function' ? value(current) : value
     setTmdbCrawlState({ selectedCandidateIds: next })
+  }
+
+  const handleResetTmdbCrawl = () => {
+    setTmdbCrawlState(defaultTmdbCrawlState)
+    toast({
+      title: 'TMDb crawl reset',
+      description: 'Cleared the current crawl preview and selection.',
+    })
   }
 
   useEffect(() => {
@@ -1286,6 +1302,16 @@ export function PosterLabManager() {
               <Search className="mr-2 h-4 w-4" />
               {isScanningTmdb ? 'Crawling TMDb...' : 'Crawl TMDb'}
             </Button>
+            {hasTmdbCrawlResults ? (
+              <Button
+                variant="outline"
+                onClick={handleResetTmdbCrawl}
+                disabled={isScanningTmdb || isImportingTmdb}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Reset Crawl
+              </Button>
+            ) : null}
             {discoveredCandidates.length > 0 ? (
               <>
                 <Badge variant="outline">{scanCategoryLabel}</Badge>

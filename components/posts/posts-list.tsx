@@ -186,6 +186,24 @@ function getDisplayDateForTimeSlot(selectedDate: string, timeSlot: string) {
   return timeSlot === '04:00' ? addOneDay(selectedDate) : selectedDate
 }
 
+function comparePostsBySchedule(first: Post, second: Post) {
+  if (first.postDate !== second.postDate) {
+    return first.postDate.localeCompare(second.postDate)
+  }
+
+  const firstMinutes = parseTimeSlotMinutes(first.timeSlot)
+  const secondMinutes = parseTimeSlotMinutes(second.timeSlot)
+  if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+    return firstMinutes - secondMinutes
+  }
+
+  if (first.timeSlot !== second.timeSlot) {
+    return first.timeSlot.localeCompare(second.timeSlot)
+  }
+
+  return first.createdAt.getTime() - second.createdAt.getTime()
+}
+
 export function PostsList() {
   const {
     posts,
@@ -428,14 +446,29 @@ export function PostsList() {
     })
   }
 
-  const filteredPosts = posts.filter((post) => {
-    if (post.postDate !== getDisplayDateForTimeSlot(selectedDate, post.timeSlot)) return false
-    if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
-    if (filterTimeSlots.length > 0 && !selectedTimeSlotSet.has(post.timeSlot)) return false
-    if (filterStatus !== 'all' && post.status !== filterStatus) return false
-    if (searchQuery && !post.caption.toLowerCase().includes(searchQuery.toLowerCase())) return false
-    return true
-  })
+  const filteredPosts = useMemo(
+    () =>
+      posts
+        .filter((post) => {
+          if (post.postDate !== getDisplayDateForTimeSlot(selectedDate, post.timeSlot)) return false
+          if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
+          if (filterTimeSlots.length > 0 && !selectedTimeSlotSet.has(post.timeSlot)) return false
+          if (filterStatus !== 'all' && post.status !== filterStatus) return false
+          if (searchQuery && !post.caption.toLowerCase().includes(searchQuery.toLowerCase())) return false
+          return true
+        })
+        .sort(comparePostsBySchedule),
+    [
+      filterPageIds.length,
+      filterStatus,
+      filterTimeSlots.length,
+      posts,
+      searchQuery,
+      selectedDate,
+      selectedPageIdSet,
+      selectedTimeSlotSet,
+    ]
+  )
 
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
