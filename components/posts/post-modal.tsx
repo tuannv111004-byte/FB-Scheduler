@@ -76,7 +76,7 @@ async function readImageDimensions(source: ImageSource) {
 
     image.crossOrigin = 'anonymous'
     image.src = objectUrl
-  })
+    })
 }
 
 function extractImageFileFromClipboard(event: ClipboardEvent) {
