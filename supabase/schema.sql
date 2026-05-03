@@ -144,6 +144,11 @@ create index if not exists vias_status_idx on vias(status);
 create index if not exists vias_location_idx on vias(location);
 create index if not exists page_vias_via_id_idx on page_vias(via_id);
 
+insert into storage.buckets (id, name, public)
+values ('post-images', 'post-images', true)
+on conflict (id) do update
+set public = excluded.public;
+
 alter table pages enable row level security;
 alter table posts enable row level security;
 alter table notes enable row level security;
@@ -185,6 +190,10 @@ drop policy if exists "public can read page vias" on page_vias;
 drop policy if exists "public can insert page vias" on page_vias;
 drop policy if exists "public can update page vias" on page_vias;
 drop policy if exists "public can delete page vias" on page_vias;
+drop policy if exists "public can read post images" on storage.objects;
+drop policy if exists "public can insert post images" on storage.objects;
+drop policy if exists "public can update post images" on storage.objects;
+drop policy if exists "public can delete post images" on storage.objects;
 
 create policy "public can read pages"
 on pages for select
@@ -353,3 +362,24 @@ create policy "public can delete page vias"
 on page_vias for delete
 to anon
 using (true);
+
+create policy "public can read post images"
+on storage.objects for select
+to anon
+using (bucket_id = 'post-images');
+
+create policy "public can insert post images"
+on storage.objects for insert
+to anon
+with check (bucket_id = 'post-images');
+
+create policy "public can update post images"
+on storage.objects for update
+to anon
+using (bucket_id = 'post-images')
+with check (bucket_id = 'post-images');
+
+create policy "public can delete post images"
+on storage.objects for delete
+to anon
+using (bucket_id = 'post-images');

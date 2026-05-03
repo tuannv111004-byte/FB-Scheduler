@@ -90,6 +90,25 @@ function extractImageFileFromClipboard(event: ClipboardEvent) {
   return null
 }
 
+function getPastedTextFromClipboard(event: ClipboardEvent) {
+  return event.clipboardData?.getData('text/plain').trim() ?? ''
+}
+
+function parseSingleUrl(value: string) {
+  if (!value || /\s/.test(value)) return null
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}
+
+function isImageUrl(url: URL) {
+  return /\.(avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(url.href)
+}
+
 async function normalizeImageFile(
   source: ImageSource,
   fitMode: ImageFitMode,
@@ -315,19 +334,50 @@ export function PostModal({
 
     const handlePaste = async (event: ClipboardEvent) => {
       const imageFile = extractImageFileFromClipboard(event)
-      if (!imageFile) return
+      if (imageFile) {
+        event.preventDefault()
+        setErrorMessage('')
+        setSelectedFile(imageFile)
 
+        try {
+          const meta = await readImageDimensions(imageFile)
+          setSelectedImageMeta(meta)
+        } catch (error) {
+          setSelectedImageMeta(null)
+          setErrorMessage(error instanceof Error ? error.message : 'Failed to inspect pasted image.')
+        }
+
+        return
+      }
+
+      const pastedText = getPastedTextFromClipboard(event)
+      if (!pastedText) return
+
+      const pastedUrl = parseSingleUrl(pastedText)
       event.preventDefault()
       setErrorMessage('')
-      setSelectedFile(imageFile)
 
-      try {
-        const meta = await readImageDimensions(imageFile)
-        setSelectedImageMeta(meta)
-      } catch (error) {
+      if (pastedUrl && isImageUrl(pastedUrl)) {
+        const imageUrl = pastedUrl.href
+        setSelectedFile(null)
         setSelectedImageMeta(null)
-        setErrorMessage(error instanceof Error ? error.message : 'Failed to inspect pasted image.')
+        setFormData((prev) => ({ ...prev, imageUrl }))
+
+        try {
+          const meta = await readImageDimensions(imageUrl)
+          setSelectedImageMeta(meta)
+        } catch {
+          setSelectedImageMeta(null)
+        }
+        return
       }
+
+      if (pastedUrl) {
+        setFormData((prev) => ({ ...prev, adsLink: pastedUrl.href }))
+        return
+      }
+
+      setFormData((prev) => ({ ...prev, caption: pastedText }))
     }
 
     window.addEventListener('paste', handlePaste)
