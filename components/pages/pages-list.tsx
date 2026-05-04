@@ -35,7 +35,7 @@ import { PageModal } from './page-modal'
 import type { FacebookPage } from '@/lib/types'
 
 export function PagesList() {
-  const { pages, deletePage, togglePageActive } = useAppStore()
+  const { pages, deletePage, togglePageActive, initializeApp, isInitialized } = useAppStore()
   const [pageOrderIds, setPageOrderIds] = useState<string[]>([])
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -102,6 +102,12 @@ export function PagesList() {
       movePage(draggedPageId, targetPageId)
     }
   }
+
+  useEffect(() => {
+    if (!isInitialized) {
+      void initializeApp()
+    }
+  }, [initializeApp, isInitialized])
 
   useEffect(() => {
     setPageOrderIds((current) => {

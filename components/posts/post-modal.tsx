@@ -38,7 +38,65 @@ import {
   type ExtractedArchiveImage,
 } from '@/lib/bulk-archive-scheduling'
 import type { Post, PostStatus } from '@/lib/types'
+<<<<<<< HEAD
 import { Archive } from 'lucide-react'
+=======
+
+const TARGET_WIDTH = 1080
+const TARGET_HEIGHT = 1350
+const TARGET_RATIO = TARGET_WIDTH / TARGET_HEIGHT
+
+type ImageFitMode = 'fill' | 'fit'
+
+type SelectedImageMeta = {
+  width: number
+  height: number
+  ratio: number
+  needsAttention: boolean
+}
+
+type ImageSource = Blob | string
+type ImageFocus = {
+  x: number
+  y: number
+}
+
+function clampFocusValue(value: number) {
+  return Math.min(1, Math.max(0, value))
+}
+
+async function readImageDimensions(source: ImageSource) {
+  return new Promise<SelectedImageMeta>((resolve, reject) => {
+    const objectUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
+    const image = new Image()
+
+    image.onload = () => {
+      const ratio = image.width / image.height
+      const ratioDiff = Math.abs(ratio - TARGET_RATIO)
+      if (typeof source !== 'string') {
+        URL.revokeObjectURL(objectUrl)
+      }
+      resolve({
+        width: image.width,
+        height: image.height,
+        ratio,
+        needsAttention:
+          image.width !== TARGET_WIDTH || image.height !== TARGET_HEIGHT || ratioDiff > 0.02,
+      })
+    }
+
+    image.onerror = () => {
+      if (typeof source !== 'string') {
+        URL.revokeObjectURL(objectUrl)
+      }
+      reject(new Error('Could not read image dimensions.'))
+    }
+
+    image.crossOrigin = 'anonymous'
+    image.src = objectUrl
+    })
+}
+>>>>>>> 74f1ea955eb74d353fc291ca6345b45d7bddb0fc
 
 function extractImageFileFromClipboard(event: ClipboardEvent) {
   for (const item of event.clipboardData?.items ?? []) {
@@ -51,6 +109,149 @@ function extractImageFileFromClipboard(event: ClipboardEvent) {
   return null
 }
 
+<<<<<<< HEAD
+=======
+function getPastedTextFromClipboard(event: ClipboardEvent) {
+  return event.clipboardData?.getData('text/plain').trim() ?? ''
+}
+
+function parseSingleUrl(value: string) {
+  if (!value || /\s/.test(value)) return null
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}
+
+function isImageUrl(url: URL) {
+  return /\.(avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(url.href)
+}
+
+async function normalizeImageFile(
+  source: ImageSource,
+  fitMode: ImageFitMode,
+  imageFocus: ImageFocus,
+  fileName = 'post-image'
+) {
+  return new Promise<File>((resolve, reject) => {
+    const objectUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
+    const image = new Image()
+
+    image.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = TARGET_WIDTH
+        canvas.height = TARGET_HEIGHT
+
+        const context = canvas.getContext('2d')
+        if (!context) {
+          throw new Error('Canvas is not available in this browser.')
+        }
+
+        context.fillStyle = '#ffffff'
+        context.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
+
+        const sourceRatio = image.width / image.height
+        let drawWidth = TARGET_WIDTH
+        let drawHeight = TARGET_HEIGHT
+        let offsetX = 0
+        let offsetY = 0
+
+        if (fitMode === 'fill') {
+          if (sourceRatio > TARGET_RATIO) {
+            drawHeight = TARGET_HEIGHT
+            drawWidth = drawHeight * sourceRatio
+            offsetX = (TARGET_WIDTH - drawWidth) * imageFocus.x
+          } else {
+            drawWidth = TARGET_WIDTH
+            drawHeight = drawWidth / sourceRatio
+            offsetY = (TARGET_HEIGHT - drawHeight) * imageFocus.y
+          }
+        } else {
+          if (sourceRatio > TARGET_RATIO) {
+            drawWidth = TARGET_WIDTH
+            drawHeight = drawWidth / sourceRatio
+            offsetY = (TARGET_HEIGHT - drawHeight) * imageFocus.y
+          } else {
+            drawHeight = TARGET_HEIGHT
+            drawWidth = drawHeight * sourceRatio
+            offsetX = (TARGET_WIDTH - drawWidth) * imageFocus.x
+          }
+        }
+
+        context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
+
+        canvas.toBlob(
+          (blob) => {
+            if (typeof source !== 'string') {
+              URL.revokeObjectURL(objectUrl)
+            }
+
+            if (!blob) {
+              reject(new Error('Failed to export normalized image.'))
+              return
+            }
+
+            const normalizedFileName = fileName.replace(/\.[^.]+$/, '') || 'post-image'
+            const normalizedFile = new File(
+              [blob],
+              normalizedFileName + '-1080x1350.jpg',
+              { type: 'image/jpeg' }
+            )
+
+            resolve(normalizedFile)
+          },
+          'image/jpeg',
+          0.92
+        )
+      } catch (error) {
+        if (typeof source !== 'string') {
+          URL.revokeObjectURL(objectUrl)
+        }
+        reject(error instanceof Error ? error : new Error('Image processing failed.'))
+      }
+    }
+
+    image.onerror = () => {
+      if (typeof source !== 'string') {
+        URL.revokeObjectURL(objectUrl)
+      }
+      reject(new Error('Could not load the selected image.'))
+    }
+
+    image.crossOrigin = 'anonymous'
+    image.src = objectUrl
+  })
+}
+
+async function fetchImageUrlAsBlob(imageUrl: string) {
+  const response = await fetch(imageUrl)
+  if (!response.ok) {
+    throw new Error('Could not download image URL for 1080x1350 processing.')
+  }
+
+  const imageBlob = await response.blob()
+  if (!imageBlob.type.startsWith('image/')) {
+    throw new Error('Image URL did not return an image file.')
+  }
+
+  return imageBlob
+}
+
+function imageUrlToFileName(imageUrl: string) {
+  try {
+    const pathname = new URL(imageUrl).pathname
+    const fileName = pathname.split('/').filter(Boolean).pop()
+    return fileName || 'post-image'
+  } catch {
+    return 'post-image'
+  }
+}
+
+>>>>>>> 74f1ea955eb74d353fc291ca6345b45d7bddb0fc
 interface PostModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -160,19 +361,50 @@ export function PostModal({
 
     const handlePaste = async (event: ClipboardEvent) => {
       const imageFile = extractImageFileFromClipboard(event)
-      if (!imageFile) return
+      if (imageFile) {
+        event.preventDefault()
+        setErrorMessage('')
+        setSelectedFile(imageFile)
 
+        try {
+          const meta = await readImageDimensions(imageFile)
+          setSelectedImageMeta(meta)
+        } catch (error) {
+          setSelectedImageMeta(null)
+          setErrorMessage(error instanceof Error ? error.message : 'Failed to inspect pasted image.')
+        }
+
+        return
+      }
+
+      const pastedText = getPastedTextFromClipboard(event)
+      if (!pastedText) return
+
+      const pastedUrl = parseSingleUrl(pastedText)
       event.preventDefault()
       setErrorMessage('')
-      setSelectedFile(imageFile)
 
-      try {
-        const meta = await readImageDimensions(imageFile)
-        setSelectedImageMeta(meta)
-      } catch (error) {
+      if (pastedUrl && isImageUrl(pastedUrl)) {
+        const imageUrl = pastedUrl.href
+        setSelectedFile(null)
         setSelectedImageMeta(null)
-        setErrorMessage(error instanceof Error ? error.message : 'Failed to inspect pasted image.')
+        setFormData((prev) => ({ ...prev, imageUrl }))
+
+        try {
+          const meta = await readImageDimensions(imageUrl)
+          setSelectedImageMeta(meta)
+        } catch {
+          setSelectedImageMeta(null)
+        }
+        return
       }
+
+      if (pastedUrl) {
+        setFormData((prev) => ({ ...prev, adsLink: pastedUrl.href }))
+        return
+      }
+
+      setFormData((prev) => ({ ...prev, caption: pastedText }))
     }
 
     window.addEventListener('paste', handlePaste)
