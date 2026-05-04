@@ -22,62 +22,23 @@ import {
 } from '@/components/ui/select'
 import { useAppStore } from '@/lib/store'
 import { isSupabaseConfigured, uploadPostImage } from '@/lib/supabase'
+import {
+  clampFocusValue,
+  fetchImageUrlAsBlob,
+  imageUrlToFileName,
+  normalizeImageFile,
+  readImageDimensions,
+  type ImageFitMode,
+  type ImageFocus,
+  type SelectedImageMeta,
+} from '@/lib/post-image-processing'
+import {
+  base64ImageToFile,
+  buildBulkScheduleAssignments,
+  type ExtractedArchiveImage,
+} from '@/lib/bulk-archive-scheduling'
 import type { Post, PostStatus } from '@/lib/types'
-
-const TARGET_WIDTH = 1080
-const TARGET_HEIGHT = 1350
-const TARGET_RATIO = TARGET_WIDTH / TARGET_HEIGHT
-
-type ImageFitMode = 'fill' | 'fit'
-
-type SelectedImageMeta = {
-  width: number
-  height: number
-  ratio: number
-  needsAttention: boolean
-}
-
-type ImageSource = Blob | string
-type ImageFocus = {
-  x: number
-  y: number
-}
-
-function clampFocusValue(value: number) {
-  return Math.min(1, Math.max(0, value))
-}
-
-async function readImageDimensions(source: ImageSource) {
-  return new Promise<SelectedImageMeta>((resolve, reject) => {
-    const objectUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
-    const image = new Image()
-
-    image.onload = () => {
-      const ratio = image.width / image.height
-      const ratioDiff = Math.abs(ratio - TARGET_RATIO)
-      if (typeof source !== 'string') {
-        URL.revokeObjectURL(objectUrl)
-      }
-      resolve({
-        width: image.width,
-        height: image.height,
-        ratio,
-        needsAttention:
-          image.width !== TARGET_WIDTH || image.height !== TARGET_HEIGHT || ratioDiff > 0.02,
-      })
-    }
-
-    image.onerror = () => {
-      if (typeof source !== 'string') {
-        URL.revokeObjectURL(objectUrl)
-      }
-      reject(new Error('Could not read image dimensions.'))
-    }
-
-    image.crossOrigin = 'anonymous'
-    image.src = objectUrl
-  })
-}
+import { Archive } from 'lucide-react'
 
 function extractImageFileFromClipboard(event: ClipboardEvent) {
   for (const item of event.clipboardData?.items ?? []) {
@@ -88,127 +49,6 @@ function extractImageFileFromClipboard(event: ClipboardEvent) {
   }
 
   return null
-}
-
-async function normalizeImageFile(
-  source: ImageSource,
-  fitMode: ImageFitMode,
-  imageFocus: ImageFocus,
-  fileName = 'post-image'
-) {
-  return new Promise<File>((resolve, reject) => {
-    const objectUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
-    const image = new Image()
-
-    image.onload = () => {
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = TARGET_WIDTH
-        canvas.height = TARGET_HEIGHT
-
-        const context = canvas.getContext('2d')
-        if (!context) {
-          throw new Error('Canvas is not available in this browser.')
-        }
-
-        context.fillStyle = '#ffffff'
-        context.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT)
-
-        const sourceRatio = image.width / image.height
-        let drawWidth = TARGET_WIDTH
-        let drawHeight = TARGET_HEIGHT
-        let offsetX = 0
-        let offsetY = 0
-
-        if (fitMode === 'fill') {
-          if (sourceRatio > TARGET_RATIO) {
-            drawHeight = TARGET_HEIGHT
-            drawWidth = drawHeight * sourceRatio
-            offsetX = (TARGET_WIDTH - drawWidth) * imageFocus.x
-          } else {
-            drawWidth = TARGET_WIDTH
-            drawHeight = drawWidth / sourceRatio
-            offsetY = (TARGET_HEIGHT - drawHeight) * imageFocus.y
-          }
-        } else {
-          if (sourceRatio > TARGET_RATIO) {
-            drawWidth = TARGET_WIDTH
-            drawHeight = drawWidth / sourceRatio
-            offsetY = (TARGET_HEIGHT - drawHeight) * imageFocus.y
-          } else {
-            drawHeight = TARGET_HEIGHT
-            drawWidth = drawHeight * sourceRatio
-            offsetX = (TARGET_WIDTH - drawWidth) * imageFocus.x
-          }
-        }
-
-        context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight)
-
-        canvas.toBlob(
-          (blob) => {
-            if (typeof source !== 'string') {
-              URL.revokeObjectURL(objectUrl)
-            }
-
-            if (!blob) {
-              reject(new Error('Failed to export normalized image.'))
-              return
-            }
-
-            const normalizedFileName = fileName.replace(/\.[^.]+$/, '') || 'post-image'
-            const normalizedFile = new File(
-              [blob],
-              normalizedFileName + '-1080x1350.jpg',
-              { type: 'image/jpeg' }
-            )
-
-            resolve(normalizedFile)
-          },
-          'image/jpeg',
-          0.92
-        )
-      } catch (error) {
-        if (typeof source !== 'string') {
-          URL.revokeObjectURL(objectUrl)
-        }
-        reject(error instanceof Error ? error : new Error('Image processing failed.'))
-      }
-    }
-
-    image.onerror = () => {
-      if (typeof source !== 'string') {
-        URL.revokeObjectURL(objectUrl)
-      }
-      reject(new Error('Could not load the selected image.'))
-    }
-
-    image.crossOrigin = 'anonymous'
-    image.src = objectUrl
-  })
-}
-
-async function fetchImageUrlAsBlob(imageUrl: string) {
-  const response = await fetch(imageUrl)
-  if (!response.ok) {
-    throw new Error('Could not download image URL for 1080x1350 processing.')
-  }
-
-  const imageBlob = await response.blob()
-  if (!imageBlob.type.startsWith('image/')) {
-    throw new Error('Image URL did not return an image file.')
-  }
-
-  return imageBlob
-}
-
-function imageUrlToFileName(imageUrl: string) {
-  try {
-    const pathname = new URL(imageUrl).pathname
-    const fileName = pathname.split('/').filter(Boolean).pop()
-    return fileName || 'post-image'
-  } catch {
-    return 'post-image'
-  }
 }
 
 interface PostModalProps {
@@ -238,10 +78,13 @@ export function PostModal({
   defaultTimeSlot,
   defaultDate,
 }: PostModalProps) {
-  const { addPost, updatePost, pages, selectedDate } = useAppStore()
+  const { addPost, updatePost, pages, posts, selectedDate } = useAppStore()
   const isEditing = !!post
   const [isSaving, setIsSaving] = useState(false)
+  const [isBulkScheduling, setIsBulkScheduling] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [bulkProgressMessage, setBulkProgressMessage] = useState('')
+  const [bulkArchiveFile, setBulkArchiveFile] = useState<File | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState('')
   const [selectedImageMeta, setSelectedImageMeta] = useState<SelectedImageMeta | null>(null)
@@ -293,6 +136,8 @@ export function PostModal({
     setSelectedImageMeta(null)
     setImageFitMode('fill')
     setImageFocus({ x: 0.5, y: 0.5 })
+    setBulkArchiveFile(null)
+    setBulkProgressMessage('')
     setErrorMessage('')
   }, [post, open, defaultPageId, defaultTimeSlot, defaultDate, selectedDate])
 
@@ -339,6 +184,10 @@ export function PostModal({
   const selectedPage = pages.find((p) => p.id === formData.pageId)
   const previewImageUrl = selectedImagePreviewUrl || formData.imageUrl.trim()
   const showImageResizeControls = selectedImageMeta?.needsAttention || Boolean(previewImageUrl)
+  const canBulkSchedule =
+    !isEditing &&
+    isSupabaseConfigured &&
+    Boolean(formData.pageId && formData.postDate && formData.timeSlot)
 
   const updateImageFocusFromPointerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!cropDragStartRef.current) return
@@ -412,6 +261,98 @@ export function PostModal({
       setErrorMessage(error instanceof Error ? error.message : 'Failed to save post.')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleBulkSchedule = async () => {
+    const bulkPage = pages.find((page) => page.id === formData.pageId)
+
+    if (!bulkPage) {
+      setErrorMessage('Select a page before bulk scheduling.')
+      return
+    }
+
+    if (!formData.postDate || !formData.timeSlot) {
+      setErrorMessage('Select a date and time slot before bulk scheduling.')
+      return
+    }
+
+    if (!bulkArchiveFile) {
+      setErrorMessage('Select a .zip or .rar archive first.')
+      return
+    }
+
+    if (!isSupabaseConfigured) {
+      setErrorMessage('Bulk archive scheduling requires Supabase storage configuration.')
+      return
+    }
+
+    setIsBulkScheduling(true)
+    setErrorMessage('')
+    setBulkProgressMessage('Extracting archive...')
+
+    try {
+      const archiveFormData = new FormData()
+      archiveFormData.append('archive', bulkArchiveFile)
+
+      const response = await fetch('/api/posts/extract-archive', {
+        method: 'POST',
+        body: archiveFormData,
+      })
+      const result = (await response.json()) as {
+        images?: ExtractedArchiveImage[]
+        error?: string
+      }
+
+      if (!response.ok || !result.images) {
+        throw new Error(result.error || 'Failed to extract archive.')
+      }
+
+      const assignments = buildBulkScheduleAssignments(
+        result.images,
+        posts,
+        bulkPage.id,
+        formData.postDate,
+        bulkPage.timeSlots,
+        formData.timeSlot
+      )
+
+      for (const [index, assignment] of assignments.entries()) {
+        setBulkProgressMessage(
+          `Scheduling ${index + 1}/${assignments.length}: ${assignment.image.filename}`
+        )
+        const imageFile = base64ImageToFile(assignment.image)
+        const normalizedFile = await normalizeImageFile(
+          imageFile,
+          imageFitMode,
+          imageFocus,
+          imageFile.name
+        )
+        const uploadedImage = await uploadPostImage(normalizedFile)
+
+        await addPost({
+          pageId: bulkPage.id,
+          postDate: assignment.postDate,
+          timeSlot: assignment.timeSlot,
+          imagePath: uploadedImage.imagePath,
+          imageUrl: uploadedImage.imageUrl,
+          caption: formData.caption,
+          adsLink: formData.adsLink,
+          status: formData.status,
+          notes: formData.notes
+            ? `${formData.notes}\nBulk scheduled from ${bulkArchiveFile.name}: ${assignment.image.filename}`
+            : `Bulk scheduled from ${bulkArchiveFile.name}: ${assignment.image.filename}`,
+        })
+      }
+
+      setBulkProgressMessage('')
+      setBulkArchiveFile(null)
+      onOpenChange(false)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to bulk schedule archive.')
+      setBulkProgressMessage('')
+    } finally {
+      setIsBulkScheduling(false)
     }
   }
 
@@ -562,6 +503,47 @@ export function PostModal({
             </p>
           </div>
 
+          {!isEditing && (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
+              <div className="space-y-1">
+                <Label htmlFor="bulkArchiveFile">Bulk Archive</Label>
+                <p className="text-xs text-muted-foreground">
+                  Upload .zip/.rar to fill empty slots for this page starting from the selected date and time.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="bulkArchiveFile"
+                  type="file"
+                  accept=".zip,.rar,application/zip,application/x-rar-compressed,application/vnd.rar"
+                  onChange={(event) => setBulkArchiveFile(event.target.files?.[0] ?? null)}
+                  disabled={!isSupabaseConfigured || isSaving || isBulkScheduling}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleBulkSchedule}
+                  disabled={!bulkArchiveFile || !canBulkSchedule || isSaving || isBulkScheduling}
+                  className="shrink-0"
+                >
+                  <Archive className="h-4 w-4 mr-2" />
+                  {isBulkScheduling ? 'Scheduling...' : 'Schedule Archive'}
+                </Button>
+              </div>
+              {bulkArchiveFile && (
+                <p className="text-xs text-muted-foreground">{bulkArchiveFile.name}</p>
+              )}
+              {bulkProgressMessage && (
+                <p className="text-xs text-primary">{bulkProgressMessage}</p>
+              )}
+              {!isSupabaseConfigured && (
+                <p className="text-xs text-muted-foreground">
+                  Supabase storage is required for extracted image uploads.
+                </p>
+              )}
+            </div>
+          )}
+
           {showImageResizeControls && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
               {selectedImageMeta?.needsAttention && (
@@ -642,7 +624,6 @@ export function PostModal({
               onChange={(e) => setFormData((prev) => ({ ...prev, caption: e.target.value }))}
               placeholder="Write your post caption here..."
               rows={4}
-              required
             />
           </div>
 
@@ -673,10 +654,15 @@ export function PostModal({
           </div>
 
           <DialogFooter className="mt-4 border-t border-border pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving || isBulkScheduling}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving}>
+            <Button type="submit" disabled={isSaving || isBulkScheduling}>
               {isSaving ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Post'}
             </Button>
           </DialogFooter>

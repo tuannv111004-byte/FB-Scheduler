@@ -208,6 +208,7 @@ export function PostsList() {
   const {
     posts,
     pages,
+    addPost,
     deletePost,
     duplicatePost,
     markAsPosted,
