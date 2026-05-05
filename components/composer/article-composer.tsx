@@ -120,7 +120,7 @@ function isBlankDraft(draft: ArticleDraft) {
   return !draft.title && !draft.description && !draft.image && !draft.descriptionImage
 }
 
-function buildJsonTitle(title: string) {
+function ensureVtTitle(title: string) {
   const trimmedTitle = title.trim()
   if (!trimmedTitle) return 'VT'
   if (/^VT\b/i.test(trimmedTitle)) return trimmedTitle
@@ -131,7 +131,7 @@ function buildJsonTitle(title: string) {
 function buildJson(drafts: ArticleDraft[]) {
   return JSON.stringify(
     drafts.map((draft) => ({
-      title: buildJsonTitle(draft.title),
+      title: ensureVtTitle(draft.title),
       description: draft.description.trim(),
       image: draft.image.trim(),
       ...(draft.descriptionImage.trim()
@@ -201,6 +201,10 @@ export function ArticleComposer() {
     setDrafts((current) =>
       current.map((draft, index) => (index === activeIndex ? { ...draft, ...updates } : draft))
     )
+  }
+
+  const normalizeActiveTitle = () => {
+    updateActiveDraft({ title: ensureVtTitle(activeDraft.title) })
   }
 
   const addElement = () => {
@@ -363,7 +367,7 @@ export function ArticleComposer() {
                     >
                       <span className="block font-medium">Element {index + 1}</span>
                       <span className="block truncate text-xs">
-                        {draft.title || 'Untitled'}
+                        {draft.title ? ensureVtTitle(draft.title) : 'Untitled'}
                       </span>
                     </button>
                   ))}
@@ -381,6 +385,7 @@ export function ArticleComposer() {
                     id="composer-title"
                     value={activeDraft.title}
                     onChange={(event) => updateActiveDraft({ title: event.target.value })}
+                    onBlur={normalizeActiveTitle}
                     placeholder="Article title"
                   />
                 </div>
@@ -620,7 +625,7 @@ export function ArticleComposer() {
                   <div>
                     <p className="text-xs font-medium uppercase text-muted-foreground">Element {index + 1}</p>
                     <h2 className="text-2xl font-semibold leading-tight text-foreground">
-                      {draft.title || 'Untitled article'}
+                      {draft.title ? ensureVtTitle(draft.title) : 'Untitled article'}
                     </h2>
                   </div>
                   <div
