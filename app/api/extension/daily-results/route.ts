@@ -5,7 +5,6 @@ export const runtime = 'nodejs'
 
 type DailyResultItem = {
   title?: unknown
-  caption?: unknown
   image?: unknown
   dailyLink?: unknown
   shortLink?: unknown
@@ -96,7 +95,6 @@ function buildNotes(item: Required<Pick<NormalizedDailyItem, 'title' | 'image' |
 
 type NormalizedDailyItem = {
   title: string
-  caption: string
   image: string
   dailyLink: string
   shortLink: string
@@ -120,7 +118,6 @@ function normalizeItems(value: unknown) {
 
     const normalizedItem = {
       title: readString(item.title),
-      caption: readString(item.caption),
       image: readString(item.image),
       dailyLink: readString(item.dailyLink),
       shortLink: readString(item.shortLink),
@@ -128,11 +125,10 @@ function normalizeItems(value: unknown) {
     }
 
     if (!normalizedItem.title) errors.push(`Item ${index + 1}: title is required.`)
-    if (!normalizedItem.caption) errors.push(`Item ${index + 1}: caption is required.`)
     if (!normalizedItem.image) errors.push(`Item ${index + 1}: image is required.`)
     if (!normalizedItem.shortLink) errors.push(`Item ${index + 1}: shortLink is required.`)
 
-    if (normalizedItem.title && normalizedItem.caption && normalizedItem.image && normalizedItem.shortLink) {
+    if (normalizedItem.title && normalizedItem.image && normalizedItem.shortLink) {
       items.push(normalizedItem)
     }
   })
@@ -271,7 +267,7 @@ export async function POST(request: Request) {
           post_date: slotKey.split('__')[0],
           time_slot: timeSlot,
           image_url: item.image,
-          caption: item.caption,
+          caption: '',
           ads_link: item.shortLink,
           status: postStatus,
           notes: [
