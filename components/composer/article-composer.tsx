@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -120,18 +121,52 @@ function isBlankDraft(draft: ArticleDraft) {
   return !draft.title && !draft.description && !draft.image && !draft.descriptionImage
 }
 
-function ensureVtTitle(title: string) {
-  const trimmedTitle = title.trim()
-  if (!trimmedTitle) return 'VT'
-  if (/^VT\b/i.test(trimmedTitle)) return trimmedTitle
+const titlePrefixPreferencesStorageKey = 'postops:composer-title-prefix'
 
-  return `VT ${trimmedTitle}`
+type TitlePrefixPreferences = {
+  enabled?: boolean
+  prefix?: string
 }
 
-function buildJson(drafts: ArticleDraft[]) {
+function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
+  if (typeof window === 'undefined') {
+    return { enabled: true, prefix: 'VT' }
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(titlePrefixPreferencesStorageKey)
+    if (!rawValue) return { enabled: true, prefix: 'VT' }
+
+    const parsedValue = JSON.parse(rawValue) as TitlePrefixPreferences
+    return {
+      enabled: parsedValue.enabled !== false,
+      prefix: typeof parsedValue.prefix === 'string' && parsedValue.prefix.trim()
+        ? parsedValue.prefix.trim()
+        : 'VT',
+    }
+  } catch {
+    return { enabled: true, prefix: 'VT' }
+  }
+}
+
+function ensureTitlePrefix(title: string, prefix: string, enabled: boolean) {
+  const trimmedTitle = title.trim()
+  const trimmedPrefix = prefix.trim()
+
+  if (!enabled || !trimmedPrefix) return trimmedTitle
+  if (!trimmedTitle) return trimmedPrefix
+  if (trimmedTitle.toLowerCase() === trimmedPrefix.toLowerCase()) return trimmedTitle
+  if (trimmedTitle.toLowerCase().startsWith(`${trimmedPrefix.toLowerCase()} `)) {
+    return trimmedTitle
+  }
+
+  return `${trimmedPrefix} ${trimmedTitle}`
+}
+
+function buildJson(drafts: ArticleDraft[], titlePrefix: string, titlePrefixEnabled: boolean) {
   return JSON.stringify(
     drafts.map((draft) => ({
-      title: ensureVtTitle(draft.title),
+      title: ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled),
       description: draft.description.trim(),
       image: draft.image.trim(),
       ...(draft.descriptionImage.trim()
@@ -169,9 +204,16 @@ export function ArticleComposer() {
   const [sourceDate, setSourceDate] = useState(storeSelectedDate)
   const [sourceStartTime, setSourceStartTime] = useState('00:00')
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([])
+  const [titlePrefixEnabled, setTitlePrefixEnabled] = useState(
+    () => readTitlePrefixPreferences().enabled
+  )
+  const [titlePrefix, setTitlePrefix] = useState(() => readTitlePrefixPreferences().prefix)
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
-  const generatedJson = useMemo(() => buildJson(drafts), [drafts])
+  const generatedJson = useMemo(
+    () => buildJson(drafts, titlePrefix, titlePrefixEnabled),
+    [drafts, titlePrefix, titlePrefixEnabled]
+  )
   const wordCount = useMemo(() => getWordCount(activeDraft.description), [activeDraft.description])
   const sourceCandidates = useMemo(() => {
     const startMinutes = parseTimeSlotMinutes(sourceStartTime) ?? 0
@@ -204,7 +246,9 @@ export function ArticleComposer() {
   }
 
   const normalizeActiveTitle = () => {
-    updateActiveDraft({ title: ensureVtTitle(activeDraft.title) })
+    updateActiveDraft({
+      title: ensureTitlePrefix(activeDraft.title, titlePrefix, titlePrefixEnabled),
+    })
   }
 
   const addElement = () => {
@@ -317,6 +361,16 @@ export function ArticleComposer() {
     }
   }
 
+  useEffect(() => {
+    window.localStorage.setItem(
+      titlePrefixPreferencesStorageKey,
+      JSON.stringify({
+        enabled: titlePrefixEnabled,
+        prefix: titlePrefix,
+      } satisfies TitlePrefixPreferences)
+    )
+  }, [titlePrefix, titlePrefixEnabled])
+
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
@@ -367,7 +421,9 @@ export function ArticleComposer() {
                     >
                       <span className="block font-medium">Element {index + 1}</span>
                       <span className="block truncate text-xs">
-                        {draft.title ? ensureVtTitle(draft.title) : 'Untitled'}
+                        {draft.title
+                          ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
+                          : 'Untitled'}
                       </span>
                     </button>
                   ))}
@@ -379,6 +435,32 @@ export function ArticleComposer() {
               </div>
 
               <div className="space-y-4">
+                <div className="flex flex-wrap items-end gap-3 rounded-md border border-border px-3 py-2">
+                  <div className="flex items-center gap-2 py-2">
+                    <Switch
+                      id="composer-title-prefix-enabled"
+                      checked={titlePrefixEnabled}
+                      onCheckedChange={setTitlePrefixEnabled}
+                    />
+                    <Label htmlFor="composer-title-prefix-enabled" className="text-sm">
+                      Title prefix
+                    </Label>
+                  </div>
+                  <div className="min-w-28 flex-1 space-y-1">
+                    <Label htmlFor="composer-title-prefix" className="text-xs text-muted-foreground">
+                      Prefix
+                    </Label>
+                    <Input
+                      id="composer-title-prefix"
+                      value={titlePrefix}
+                      onChange={(event) => setTitlePrefix(event.target.value)}
+                      onBlur={(event) => setTitlePrefix(event.target.value.trim() || 'VT')}
+                      disabled={!titlePrefixEnabled}
+                      className="h-8"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="composer-title">Title</Label>
                   <Input
@@ -625,7 +707,9 @@ export function ArticleComposer() {
                   <div>
                     <p className="text-xs font-medium uppercase text-muted-foreground">Element {index + 1}</p>
                     <h2 className="text-2xl font-semibold leading-tight text-foreground">
-                      {draft.title ? ensureVtTitle(draft.title) : 'Untitled article'}
+                      {draft.title
+                        ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
+                        : 'Untitled article'}
                     </h2>
                   </div>
                   <div
