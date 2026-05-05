@@ -35,6 +35,7 @@ import {
 import {
   base64ImageToFile,
   buildBulkScheduleAssignments,
+  extractZipArchiveImages,
   type ExtractedArchiveImage,
 } from '@/lib/bulk-archive-scheduling'
 import type { Post, PostStatus } from '@/lib/types'
@@ -92,6 +93,11 @@ async function readExtractArchiveResponse(response: Response) {
     const fallbackMessage = responseText.trim() || response.statusText || 'Failed to extract archive.'
     throw new Error(fallbackMessage)
   }
+}
+
+function getArchiveExtension(fileName: string) {
+  const dotIndex = fileName.lastIndexOf('.')
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : ''
 }
 
 interface PostModalProps {
@@ -356,9 +362,16 @@ export function PostModal({
       return
     }
 
-    if (bulkArchiveFile.size > MAX_ARCHIVE_UPLOAD_BYTES) {
+    const archiveExtension = getArchiveExtension(bulkArchiveFile.name)
+
+    if (archiveExtension !== '.zip' && archiveExtension !== '.rar') {
+      setErrorMessage('Only .zip and .rar archives are supported.')
+      return
+    }
+
+    if (archiveExtension === '.rar' && bulkArchiveFile.size > MAX_ARCHIVE_UPLOAD_BYTES) {
       setErrorMessage(
-        `Archive is ${formatFileSize(bulkArchiveFile.size)}. Vercel request uploads are limited, so use an archive under ${formatFileSize(MAX_ARCHIVE_UPLOAD_BYTES)}.`
+        `RAR archive is ${formatFileSize(bulkArchiveFile.size)}. Vercel request uploads are limited, so use a RAR under ${formatFileSize(MAX_ARCHIVE_UPLOAD_BYTES)} or convert it to ZIP.`
       )
       return
     }
@@ -373,21 +386,29 @@ export function PostModal({
     setBulkProgressMessage('Extracting archive...')
 
     try {
-      const archiveFormData = new FormData()
-      archiveFormData.append('archive', bulkArchiveFile)
+      let extractedImages: ExtractedArchiveImage[]
 
-      const response = await fetch('/api/posts/extract-archive', {
-        method: 'POST',
-        body: archiveFormData,
-      })
-      const result = await readExtractArchiveResponse(response)
+      if (archiveExtension === '.zip') {
+        extractedImages = await extractZipArchiveImages(bulkArchiveFile)
+      } else {
+        const archiveFormData = new FormData()
+        archiveFormData.append('archive', bulkArchiveFile)
 
-      if (!response.ok || !result.images) {
-        throw new Error(result.error || 'Failed to extract archive.')
+        const response = await fetch('/api/posts/extract-archive', {
+          method: 'POST',
+          body: archiveFormData,
+        })
+        const result = await readExtractArchiveResponse(response)
+
+        if (!response.ok || !result.images) {
+          throw new Error(result.error || 'Failed to extract archive.')
+        }
+
+        extractedImages = result.images
       }
 
       const assignments = buildBulkScheduleAssignments(
-        result.images,
+        extractedImages,
         posts,
         bulkPage.id,
         formData.postDate,
