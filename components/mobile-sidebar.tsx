@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import {
   LayoutDashboard,
   FileText,
+  PenLine,
   Calendar,
   Settings,
   Bell,
@@ -32,6 +33,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Pages', href: '/pages', icon: Facebook },
   { name: 'Posts', href: '/posts', icon: FileText },
+  { name: 'Composer', href: '/composer', icon: PenLine },
   { name: 'Schedule', href: '/schedule', icon: Calendar },
   { name: 'Notes', href: '/notes', icon: NotebookText },
   { name: 'Poster Lab', href: '/poster-lab', icon: Film },
