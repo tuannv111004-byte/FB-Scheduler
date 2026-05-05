@@ -27,9 +27,12 @@ type PageRow = {
 }
 
 type ExistingPostRow = {
+  id: string
   post_date: string
   time_slot: string
   status: PostStatus
+  ads_link: string | null
+  notes: string | null
 }
 
 const allowedStatuses: PostStatus[] = [
@@ -134,6 +137,24 @@ function buildNotes(item: Required<Pick<NormalizedDailyItem, 'title' | 'image' |
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+function compareSchedule(firstDate: string, firstTimeSlot: string, secondDate: string, secondTimeSlot: string) {
+  if (firstDate !== secondDate) {
+    return firstDate.localeCompare(secondDate)
+  }
+
+  const firstMinutes = parseTimeSlotMinutes(firstTimeSlot)
+  const secondMinutes = parseTimeSlotMinutes(secondTimeSlot)
+  if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+    return firstMinutes - secondMinutes
+  }
+
+  return firstTimeSlot.localeCompare(secondTimeSlot)
+}
+
+function appendNotes(currentNotes: string | null, importedNotes: string) {
+  return [currentNotes?.trim() ?? '', importedNotes.trim()].filter(Boolean).join('\n\n')
 }
 
 type NormalizedDailyItem = {
@@ -274,67 +295,76 @@ export async function POST(request: Request) {
       return jsonResponse({ error: 'Selected page has no time slots configured.' }, { status: 400 })
     }
 
-    const startPosition = resolveStartPosition(sortedSlots, startDate, startTimeSlot)
-    let slotIndex = startPosition.slotIndex
-    let targetDate = startPosition.targetDate
-
     const { data: existingPostsData, error: postsError } = await supabase
       .from('posts')
-      .select('post_date,time_slot,status')
+      .select('id,post_date,time_slot,status,ads_link,notes')
       .eq('page_id', pageId)
 
     if (postsError) throw postsError
 
-    const occupiedSlots = new Set(
-      ((existingPostsData as ExistingPostRow[] | null) ?? [])
-        .filter((post) => post.status !== 'skipped')
-        .map((post) => `${post.post_date}__${post.time_slot}`)
+    const startPosition = resolveStartPosition(sortedSlots, startDate, startTimeSlot)
+    const startDateForSearch = startPosition.targetDate
+    const startTimeSlotForSearch = sortedSlots[startPosition.slotIndex]
+
+    const existingPosts = ((existingPostsData as ExistingPostRow[] | null) ?? []).sort((first, second) =>
+      compareSchedule(first.post_date, first.time_slot, second.post_date, second.time_slot)
     )
 
-    const rows = items.map((item) => {
-      for (;;) {
-        const timeSlot = sortedSlots[slotIndex]
-        const slotKey = `${targetDate}__${timeSlot}`
+    const candidatePosts = existingPosts.filter((post) => {
+      if (post.status === 'skipped') return false
+      if (readString(post.ads_link)) return false
+      if (!sortedSlots.includes(post.time_slot)) return false
 
-        slotIndex += 1
-        if (slotIndex >= sortedSlots.length) {
-          slotIndex = 0
-          targetDate = addOneDay(targetDate)
-        }
-
-        if (occupiedSlots.has(slotKey)) continue
-        occupiedSlots.add(slotKey)
-
-        return {
-          page_id: pageId,
-          post_date: slotKey.split('__')[0],
-          time_slot: timeSlot,
-          image_url: item.image,
-          caption: '',
-          ads_link: item.shortLink,
-          status: postStatus,
-          notes: [
-            buildNotes(item),
-            item.dailyLink ? `Daily link: ${item.dailyLink}` : '',
-            item.domain ? `Domain: ${item.domain}` : '',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          updated_at: new Date().toISOString(),
-        }
-      }
+      return compareSchedule(
+        post.post_date,
+        post.time_slot,
+        startDateForSearch,
+        startTimeSlotForSearch
+      ) >= 0
     })
 
-    const { data: createdRows, error: insertError } = await supabase
-      .from('posts')
-      .insert(rows)
-      .select('id,post_date,time_slot,caption,ads_link')
+    if (candidatePosts.length < items.length) {
+      return jsonResponse(
+        {
+          error: `Not enough posts with empty adsLink from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${items.length}, found ${candidatePosts.length}.`,
+        },
+        { status: 400 }
+      )
+    }
 
-    if (insertError) throw insertError
+    const updatedRows = []
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]
+      const post = candidatePosts[index]
+      const importedNotes = [
+        buildNotes(item),
+        item.dailyLink ? `Daily link: ${item.dailyLink}` : '',
+        item.domain ? `Domain: ${item.domain}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+
+      const { data: updatedPostRows, error: updateError } = await supabase
+        .from('posts')
+        .update({
+          ads_link: item.shortLink,
+          notes: appendNotes(post.notes, importedNotes),
+          status: postStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', post.id)
+        .select('id,post_date,time_slot,caption,ads_link')
+
+      if (updateError) throw updateError
+      if (updatedPostRows?.[0]) {
+        updatedRows.push(updatedPostRows[0])
+      }
+    }
 
     return jsonResponse({
-      created: createdRows?.length ?? 0,
-      posts: createdRows ?? [],
+      updated: updatedRows.length,
+      posts: updatedRows,
     })
   } catch (error) {
     return jsonResponse(
