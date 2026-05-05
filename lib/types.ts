@@ -97,6 +97,55 @@ export interface SourceItem extends SourceInput {
   updatedAt: Date
 }
 
+export type SportType = 'baseball' | 'basketball' | 'football' | 'soccer' | 'other'
+
+export interface SportsTeamInput {
+  name: string
+  sport: SportType
+  league: string
+  city: string
+  country: string
+  logoUrl?: string
+  ownerName: string
+  headCoach: string
+  assistantCoaches: string
+  legends: string
+  notes: string
+}
+
+export interface SportsTeam extends SportsTeamInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type PlayerStatus = 'active' | 'injured' | 'inactive' | 'retired' | 'left_team'
+
+export interface SportsPlayerInput {
+  teamId: string
+  fullName: string
+  position: string
+  jerseyNumber: string
+  birthDate?: string
+  nationality: string
+  photoUrl?: string
+  height: string
+  weight: string
+  status: PlayerStatus
+  spouse: string
+  father: string
+  mother: string
+  children: string
+  bio: string
+  notes: string
+}
+
+export interface SportsPlayer extends SportsPlayerInput {
+  id: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export type PosterLabGenre =
   | 'action'
   | 'horror'

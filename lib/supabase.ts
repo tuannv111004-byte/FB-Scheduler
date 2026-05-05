@@ -12,9 +12,15 @@ import type {
   Post,
   PostInput,
   PostStatus,
+  PlayerStatus,
   SourceInput,
   SourceItem,
   SourceType,
+  SportsPlayer,
+  SportsPlayerInput,
+  SportsTeam,
+  SportsTeamInput,
+  SportType,
   StickyNote,
   ViaAccount,
   ViaInput,
@@ -116,6 +122,45 @@ type SourceRow = {
   description: string
   notes: string
   is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+type SportsTeamRow = {
+  id: string
+  name: string
+  sport: SportType
+  league: string
+  city: string
+  country: string
+  logo_url: string | null
+  owner_name: string
+  head_coach: string
+  assistant_coaches: string
+  legends: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+type SportsPlayerRow = {
+  id: string
+  team_id: string
+  full_name: string
+  position: string
+  jersey_number: string
+  birth_date: string | null
+  nationality: string
+  photo_url: string | null
+  height: string
+  weight: string
+  status: PlayerStatus
+  spouse: string
+  father: string
+  mother: string
+  children: string
+  bio: string
+  notes: string
   created_at: string
   updated_at: string
 }
@@ -232,6 +277,49 @@ function mapSourceRow(row: SourceRow): SourceItem {
   }
 }
 
+function mapSportsTeamRow(row: SportsTeamRow): SportsTeam {
+  return {
+    id: row.id,
+    name: row.name,
+    sport: row.sport,
+    league: row.league,
+    city: row.city,
+    country: row.country,
+    logoUrl: row.logo_url ?? undefined,
+    ownerName: row.owner_name,
+    headCoach: row.head_coach,
+    assistantCoaches: row.assistant_coaches,
+    legends: row.legends,
+    notes: row.notes,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
+function mapSportsPlayerRow(row: SportsPlayerRow): SportsPlayer {
+  return {
+    id: row.id,
+    teamId: row.team_id,
+    fullName: row.full_name,
+    position: row.position,
+    jerseyNumber: row.jersey_number,
+    birthDate: row.birth_date ?? undefined,
+    nationality: row.nationality,
+    photoUrl: row.photo_url ?? undefined,
+    height: row.height,
+    weight: row.weight,
+    status: row.status,
+    spouse: row.spouse,
+    father: row.father,
+    mother: row.mother,
+    children: row.children,
+    bio: row.bio,
+    notes: row.notes,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  }
+}
+
 function mapPosterLabFranchiseRow(row: PosterLabFranchiseRow): PosterLabFranchise {
   return {
     id: row.id,
@@ -333,6 +421,45 @@ function sourcePayload(input: SourceInput) {
     description: input.description,
     notes: input.notes,
     is_active: input.isActive,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function sportsTeamPayload(input: SportsTeamInput) {
+  return {
+    name: input.name,
+    sport: input.sport,
+    league: input.league,
+    city: input.city,
+    country: input.country,
+    logo_url: input.logoUrl || null,
+    owner_name: input.ownerName,
+    head_coach: input.headCoach,
+    assistant_coaches: input.assistantCoaches,
+    legends: input.legends,
+    notes: input.notes,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function sportsPlayerPayload(input: SportsPlayerInput) {
+  return {
+    team_id: input.teamId,
+    full_name: input.fullName,
+    position: input.position,
+    jersey_number: input.jerseyNumber,
+    birth_date: input.birthDate || null,
+    nationality: input.nationality,
+    photo_url: input.photoUrl || null,
+    height: input.height,
+    weight: input.weight,
+    status: input.status,
+    spouse: input.spouse,
+    father: input.father,
+    mother: input.mother,
+    children: input.children,
+    bio: input.bio,
+    notes: input.notes,
     updated_at: new Date().toISOString(),
   }
 }
@@ -764,6 +891,138 @@ export async function updateSourceRemote(id: string, updates: Partial<SourceInpu
 export async function deleteSourceRemote(id: string) {
   const client = requireSupabase()
   const { error } = await client.from('sources').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchSportsTeamsRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sports_teams')
+    .select('*')
+    .order('name', { ascending: true })
+
+  if (error) throw error
+  return (data as SportsTeamRow[]).map(mapSportsTeamRow)
+}
+
+export async function createSportsTeamRemote(input: SportsTeamInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sports_teams')
+    .insert(sportsTeamPayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapSportsTeamRow(data as SportsTeamRow)
+}
+
+export async function updateSportsTeamRemote(id: string, updates: Partial<SportsTeamInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.name !== undefined) payload.name = updates.name
+  if (updates.sport !== undefined) payload.sport = updates.sport
+  if (updates.league !== undefined) payload.league = updates.league
+  if (updates.city !== undefined) payload.city = updates.city
+  if (updates.country !== undefined) payload.country = updates.country
+  if (updates.logoUrl !== undefined) payload.logo_url = updates.logoUrl || null
+  if (updates.ownerName !== undefined) payload.owner_name = updates.ownerName
+  if (updates.headCoach !== undefined) payload.head_coach = updates.headCoach
+  if (updates.assistantCoaches !== undefined) payload.assistant_coaches = updates.assistantCoaches
+  if (updates.legends !== undefined) payload.legends = updates.legends
+  if (updates.notes !== undefined) payload.notes = updates.notes
+
+  const { data, error } = await client
+    .from('sports_teams')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapSportsTeamRow(data as SportsTeamRow)
+}
+
+export async function deleteSportsTeamRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('sports_teams').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function fetchSportsPlayersRemote() {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sports_players')
+    .select('*')
+    .order('full_name', { ascending: true })
+
+  if (error) throw error
+  return (data as SportsPlayerRow[]).map(mapSportsPlayerRow)
+}
+
+export async function createSportsPlayerRemote(input: SportsPlayerInput) {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sports_players')
+    .insert(sportsPlayerPayload(input))
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapSportsPlayerRow(data as SportsPlayerRow)
+}
+
+export async function createSportsPlayersBulkRemote(items: SportsPlayerInput[]) {
+  if (items.length === 0) {
+    return [] as SportsPlayer[]
+  }
+
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('sports_players')
+    .insert(items.map((item) => sportsPlayerPayload(item)))
+    .select('*')
+
+  if (error) throw error
+  return (data as SportsPlayerRow[]).map(mapSportsPlayerRow)
+}
+
+export async function updateSportsPlayerRemote(id: string, updates: Partial<SportsPlayerInput>) {
+  const client = requireSupabase()
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (updates.teamId !== undefined) payload.team_id = updates.teamId
+  if (updates.fullName !== undefined) payload.full_name = updates.fullName
+  if (updates.position !== undefined) payload.position = updates.position
+  if (updates.jerseyNumber !== undefined) payload.jersey_number = updates.jerseyNumber
+  if (updates.birthDate !== undefined) payload.birth_date = updates.birthDate || null
+  if (updates.nationality !== undefined) payload.nationality = updates.nationality
+  if (updates.photoUrl !== undefined) payload.photo_url = updates.photoUrl || null
+  if (updates.height !== undefined) payload.height = updates.height
+  if (updates.weight !== undefined) payload.weight = updates.weight
+  if (updates.status !== undefined) payload.status = updates.status
+  if (updates.spouse !== undefined) payload.spouse = updates.spouse
+  if (updates.father !== undefined) payload.father = updates.father
+  if (updates.mother !== undefined) payload.mother = updates.mother
+  if (updates.children !== undefined) payload.children = updates.children
+  if (updates.bio !== undefined) payload.bio = updates.bio
+  if (updates.notes !== undefined) payload.notes = updates.notes
+
+  const { data, error } = await client
+    .from('sports_players')
+    .update(payload)
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapSportsPlayerRow(data as SportsPlayerRow)
+}
+
+export async function deleteSportsPlayerRemote(id: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('sports_players').delete().eq('id', id)
   if (error) throw error
 }
 

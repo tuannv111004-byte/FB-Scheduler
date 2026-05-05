@@ -16,6 +16,7 @@ import {
   NotebookText,
   SearchCheck,
   ShieldCheck,
+  Trophy,
 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
 import { useDesktopSidebar } from '@/hooks/use-desktop-sidebar'
@@ -27,6 +28,7 @@ const navigation = [
   { name: 'Schedule', href: '/schedule', icon: Calendar },
   { name: 'Notes', href: '/notes', icon: NotebookText },
   { name: 'Poster Lab', href: '/poster-lab', icon: Film },
+  { name: 'Team', href: '/players', icon: Trophy },
   { name: 'Sources', href: '/sources', icon: SearchCheck },
   { name: 'Via', href: '/via', icon: ShieldCheck },
 ]

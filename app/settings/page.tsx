@@ -266,7 +266,7 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                   <Label>Backup file</Label>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Export includes pages, posts, notes, vias, page links, sources, Poster Lab movies, and sequels.
+                    Export includes pages, posts, notes, vias, page links, sources, teams, players, Poster Lab movies, and sequels.
                   </p>
                 </div>
                 <Button

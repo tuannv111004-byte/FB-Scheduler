@@ -81,6 +81,50 @@ create table if not exists sources (
 create index if not exists sources_type_idx on sources(type);
 create index if not exists sources_active_idx on sources(is_active);
 
+create table if not exists sports_teams (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  sport text not null default 'baseball',
+  league text not null default '',
+  city text not null default '',
+  country text not null default '',
+  logo_url text,
+  owner_name text not null default '',
+  head_coach text not null default '',
+  assistant_coaches text not null default '',
+  legends text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists sports_players (
+  id uuid primary key default gen_random_uuid(),
+  team_id uuid not null references sports_teams(id) on delete cascade,
+  full_name text not null,
+  position text not null default '',
+  jersey_number text not null default '',
+  birth_date date,
+  nationality text not null default '',
+  photo_url text,
+  height text not null default '',
+  weight text not null default '',
+  status text not null default 'active',
+  spouse text not null default '',
+  father text not null default '',
+  mother text not null default '',
+  children text not null default '',
+  bio text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists sports_teams_sport_idx on sports_teams(sport);
+create index if not exists sports_teams_league_idx on sports_teams(league);
+create index if not exists sports_players_team_id_idx on sports_players(team_id);
+create index if not exists sports_players_status_idx on sports_players(status);
+
 create table if not exists poster_lab_franchises (
   id uuid primary key default gen_random_uuid(),
   franchise_name text not null,
@@ -154,6 +198,8 @@ alter table posts enable row level security;
 alter table notes enable row level security;
 alter table vias enable row level security;
 alter table sources enable row level security;
+alter table sports_teams enable row level security;
+alter table sports_players enable row level security;
 alter table poster_lab_franchises enable row level security;
 alter table poster_lab_sequels enable row level security;
 alter table page_vias enable row level security;
@@ -178,6 +224,14 @@ drop policy if exists "public can read sources" on sources;
 drop policy if exists "public can insert sources" on sources;
 drop policy if exists "public can update sources" on sources;
 drop policy if exists "public can delete sources" on sources;
+drop policy if exists "public can read sports teams" on sports_teams;
+drop policy if exists "public can insert sports teams" on sports_teams;
+drop policy if exists "public can update sports teams" on sports_teams;
+drop policy if exists "public can delete sports teams" on sports_teams;
+drop policy if exists "public can read sports players" on sports_players;
+drop policy if exists "public can insert sports players" on sports_players;
+drop policy if exists "public can update sports players" on sports_players;
+drop policy if exists "public can delete sports players" on sports_players;
 drop policy if exists "public can read poster lab franchises" on poster_lab_franchises;
 drop policy if exists "public can insert poster lab franchises" on poster_lab_franchises;
 drop policy if exists "public can update poster lab franchises" on poster_lab_franchises;
@@ -297,6 +351,48 @@ with check (true);
 
 create policy "public can delete sources"
 on sources for delete
+to anon
+using (true);
+
+create policy "public can read sports teams"
+on sports_teams for select
+to anon
+using (true);
+
+create policy "public can insert sports teams"
+on sports_teams for insert
+to anon
+with check (true);
+
+create policy "public can update sports teams"
+on sports_teams for update
+to anon
+using (true)
+with check (true);
+
+create policy "public can delete sports teams"
+on sports_teams for delete
+to anon
+using (true);
+
+create policy "public can read sports players"
+on sports_players for select
+to anon
+using (true);
+
+create policy "public can insert sports players"
+on sports_players for insert
+to anon
+with check (true);
+
+create policy "public can update sports players"
+on sports_players for update
+to anon
+using (true)
+with check (true);
+
+create policy "public can delete sports players"
+on sports_players for delete
 to anon
 using (true);
 
