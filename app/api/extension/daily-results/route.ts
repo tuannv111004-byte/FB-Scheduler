@@ -86,6 +86,7 @@ function addOneDay(dateValue: string) {
 function buildNotes(item: Required<Pick<NormalizedDailyItem, 'title' | 'image' | 'shortLink'>>) {
   return [
     'Imported from Daily Feji extension.',
+    `Title: ${item.title}`,
     `Short link: ${item.shortLink}`,
     item.image ? `Image: ${item.image}` : '',
   ]

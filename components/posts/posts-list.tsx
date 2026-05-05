@@ -455,7 +455,19 @@ export function PostsList() {
           if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
           if (filterTimeSlots.length > 0 && !selectedTimeSlotSet.has(post.timeSlot)) return false
           if (filterStatus !== 'all' && post.status !== filterStatus) return false
-          if (searchQuery && !post.caption.toLowerCase().includes(searchQuery.toLowerCase())) return false
+          if (searchQuery) {
+            const normalizedSearchQuery = searchQuery.toLowerCase()
+            const searchableText = [
+              post.caption,
+              post.adsLink ?? '',
+              post.imageUrl ?? '',
+              post.notes,
+            ]
+              .join(' ')
+              .toLowerCase()
+
+            if (!searchableText.includes(normalizedSearchQuery)) return false
+          }
           return true
         })
         .sort(comparePostsBySchedule),
@@ -817,7 +829,9 @@ export function PostsList() {
                           className="block w-full truncate text-left text-sm text-foreground hover:text-primary"
                           title="Click to copy caption"
                         >
-                          {post.caption}
+                          {post.caption || (
+                            <span className="text-muted-foreground">No caption yet</span>
+                          )}
                         </button>
                       </TableCell>
                       <TableCell>
