@@ -312,7 +312,6 @@ export async function POST(request: Request) {
 
     const candidatePosts = existingPosts.filter((post) => {
       if (post.status === 'skipped') return false
-      if (readString(post.ads_link)) return false
       if (!sortedSlots.includes(post.time_slot)) return false
 
       return compareSchedule(
@@ -326,7 +325,7 @@ export async function POST(request: Request) {
     if (candidatePosts.length < items.length) {
       return jsonResponse(
         {
-          error: `Not enough posts with empty adsLink from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${items.length}, found ${candidatePosts.length}.`,
+          error: `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${items.length}, found ${candidatePosts.length}.`,
         },
         { status: 400 }
       )
