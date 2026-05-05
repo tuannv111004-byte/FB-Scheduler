@@ -120,10 +120,18 @@ function isBlankDraft(draft: ArticleDraft) {
   return !draft.title && !draft.description && !draft.image && !draft.descriptionImage
 }
 
+function buildJsonTitle(title: string) {
+  const trimmedTitle = title.trim()
+  if (!trimmedTitle) return 'VT'
+  if (/^VT\b/i.test(trimmedTitle)) return trimmedTitle
+
+  return `VT ${trimmedTitle}`
+}
+
 function buildJson(drafts: ArticleDraft[]) {
   return JSON.stringify(
     drafts.map((draft) => ({
-      title: draft.title.trim(),
+      title: buildJsonTitle(draft.title),
       description: draft.description.trim(),
       image: draft.image.trim(),
       ...(draft.descriptionImage.trim()
