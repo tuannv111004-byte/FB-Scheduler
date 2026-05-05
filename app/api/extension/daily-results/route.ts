@@ -73,6 +73,48 @@ function parseTimeSlotMinutes(timeSlot: string) {
   return hours * 60 + minutes
 }
 
+function resolveStartPosition(timeSlots: string[], startDate: string, startTimeSlot: string) {
+  if (!startTimeSlot) {
+    return {
+      slotIndex: 0,
+      targetDate: startDate,
+    }
+  }
+
+  const exactSlotIndex = timeSlots.indexOf(startTimeSlot)
+  if (exactSlotIndex >= 0) {
+    return {
+      slotIndex: exactSlotIndex,
+      targetDate: startDate,
+    }
+  }
+
+  const startMinutes = parseTimeSlotMinutes(startTimeSlot)
+  if (startMinutes === null) {
+    return {
+      slotIndex: 0,
+      targetDate: startDate,
+    }
+  }
+
+  const nextSlotIndex = timeSlots.findIndex((timeSlot) => {
+    const slotMinutes = parseTimeSlotMinutes(timeSlot)
+    return slotMinutes !== null && slotMinutes >= startMinutes
+  })
+
+  if (nextSlotIndex >= 0) {
+    return {
+      slotIndex: nextSlotIndex,
+      targetDate: startDate,
+    }
+  }
+
+  return {
+    slotIndex: 0,
+    targetDate: addOneDay(startDate),
+  }
+}
+
 function addOneDay(dateValue: string) {
   const date = new Date(`${dateValue}T00:00:00`)
   date.setDate(date.getDate() + 1)
@@ -232,9 +274,9 @@ export async function POST(request: Request) {
       return jsonResponse({ error: 'Selected page has no time slots configured.' }, { status: 400 })
     }
 
-    const startSlotIndex = startTimeSlot ? sortedSlots.indexOf(startTimeSlot) : -1
-    let slotIndex = startSlotIndex >= 0 ? startSlotIndex : 0
-    let targetDate = startDate
+    const startPosition = resolveStartPosition(sortedSlots, startDate, startTimeSlot)
+    let slotIndex = startPosition.slotIndex
+    let targetDate = startPosition.targetDate
 
     const { data: existingPostsData, error: postsError } = await supabase
       .from('posts')
