@@ -40,6 +40,8 @@ import {
 import type { Post, PostStatus } from '@/lib/types'
 import { Archive } from 'lucide-react'
 
+const MAX_ARCHIVE_UPLOAD_BYTES = 4 * 1024 * 1024
+
 function extractImageFileFromClipboard(event: ClipboardEvent) {
   for (const item of event.clipboardData?.items ?? []) {
     if (item.type.startsWith('image/')) {
@@ -69,6 +71,29 @@ function parseSingleUrl(value: string) {
 function isImageUrl(url: URL) {
   return /\.(avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(url.href)
 }
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024 * 1024) {
+    return `${Math.ceil(bytes / 1024)} KB`
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function readExtractArchiveResponse(response: Response) {
+  const responseText = await response.text()
+
+  try {
+    return JSON.parse(responseText) as {
+      images?: ExtractedArchiveImage[]
+      error?: string
+    }
+  } catch {
+    const fallbackMessage = responseText.trim() || response.statusText || 'Failed to extract archive.'
+    throw new Error(fallbackMessage)
+  }
+}
+
 interface PostModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -331,6 +356,13 @@ export function PostModal({
       return
     }
 
+    if (bulkArchiveFile.size > MAX_ARCHIVE_UPLOAD_BYTES) {
+      setErrorMessage(
+        `Archive is ${formatFileSize(bulkArchiveFile.size)}. Vercel request uploads are limited, so use an archive under ${formatFileSize(MAX_ARCHIVE_UPLOAD_BYTES)}.`
+      )
+      return
+    }
+
     if (!isSupabaseConfigured) {
       setErrorMessage('Bulk archive scheduling requires Supabase storage configuration.')
       return
@@ -348,10 +380,7 @@ export function PostModal({
         method: 'POST',
         body: archiveFormData,
       })
-      const result = (await response.json()) as {
-        images?: ExtractedArchiveImage[]
-        error?: string
-      }
+      const result = await readExtractArchiveResponse(response)
 
       if (!response.ok || !result.images) {
         throw new Error(result.error || 'Failed to extract archive.')
