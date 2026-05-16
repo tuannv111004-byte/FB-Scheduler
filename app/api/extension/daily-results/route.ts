@@ -6,6 +6,8 @@ export const runtime = 'nodejs'
 type DailyResultItem = {
   title?: unknown
   image?: unknown
+  caption?: unknown
+  schedulerPostId?: unknown
   dailyLink?: unknown
   shortLink?: unknown
   domain?: unknown
@@ -23,7 +25,9 @@ type ImportRequest = {
 
 type PageRow = {
   id: string
+  name?: string
   time_slots: string[] | null
+  is_active?: boolean
 }
 
 type ExistingPostRow = {
@@ -47,7 +51,7 @@ const allowedStatuses: PostStatus[] = [
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
@@ -160,6 +164,8 @@ function appendNotes(currentNotes: string | null, importedNotes: string) {
 type NormalizedDailyItem = {
   title: string
   image: string
+  caption: string
+  schedulerPostId: string
   dailyLink: string
   shortLink: string
   domain: string
@@ -183,6 +189,8 @@ function normalizeItems(value: unknown) {
     const normalizedItem = {
       title: readString(item.title),
       image: readString(item.image),
+      caption: readString(item.caption),
+      schedulerPostId: readString(item.schedulerPostId),
       dailyLink: readString(item.dailyLink),
       shortLink: readString(item.shortLink),
       domain: readString(item.domain),
@@ -244,6 +252,47 @@ export async function OPTIONS() {
     status: 204,
     headers: corsHeaders,
   })
+}
+
+export async function GET(request: Request) {
+  try {
+    if (!requireImportToken(request)) {
+      return jsonResponse({ error: 'Unauthorized.' }, { status: 401 })
+    }
+
+    const supabase = createServerSupabaseClient()
+    const { data, error } = await supabase
+      .from('pages')
+      .select('id,name,time_slots,is_active')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+
+    if (error) throw error
+
+    const pages = ((data as PageRow[] | null) ?? []).map((page) => ({
+      id: page.id,
+      name: page.name ?? 'Untitled page',
+      timeSlots: [...(page.time_slots ?? [])].sort((first, second) => {
+        const firstMinutes = parseTimeSlotMinutes(first)
+        const secondMinutes = parseTimeSlotMinutes(second)
+
+        if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+          return firstMinutes - secondMinutes
+        }
+
+        return first.localeCompare(second)
+      }),
+    }))
+
+    return jsonResponse({ pages })
+  } catch (error) {
+    return jsonResponse(
+      {
+        error: error instanceof Error ? error.message : 'Failed to load Scheduler pages.',
+      },
+      { status: 500 }
+    )
+  }
 }
 
 export async function POST(request: Request) {
@@ -322,20 +371,37 @@ export async function POST(request: Request) {
       ) >= 0
     })
 
-    if (candidatePosts.length < items.length) {
+    const itemsWithoutPostId = items.filter((item) => !item.schedulerPostId)
+
+    if (candidatePosts.length < itemsWithoutPostId.length) {
       return jsonResponse(
         {
-          error: `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${items.length}, found ${candidatePosts.length}.`,
+          error: `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${itemsWithoutPostId.length}, found ${candidatePosts.length}.`,
         },
         { status: 400 }
       )
     }
 
     const updatedRows = []
+    let candidatePostIndex = 0
 
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]
-      const post = candidatePosts[index]
+      const post = item.schedulerPostId
+        ? existingPosts.find((candidate) => candidate.id === item.schedulerPostId)
+        : candidatePosts[candidatePostIndex++]
+
+      if (!post) {
+        return jsonResponse(
+          {
+            error: item.schedulerPostId
+              ? `Post ${item.schedulerPostId} was not found for the selected page.`
+              : `No scheduled post found for item ${index + 1}.`,
+          },
+          { status: 400 }
+        )
+      }
+
       const importedNotes = [
         buildNotes(item),
         item.dailyLink ? `Daily link: ${item.dailyLink}` : '',
@@ -343,15 +409,20 @@ export async function POST(request: Request) {
       ]
         .filter(Boolean)
         .join('\n')
+      const updatePayload: Record<string, unknown> = {
+        ads_link: item.shortLink,
+        notes: appendNotes(post.notes, importedNotes),
+        status: postStatus,
+        updated_at: new Date().toISOString(),
+      }
+
+      if (item.caption) {
+        updatePayload.caption = item.caption
+      }
 
       const { data: updatedPostRows, error: updateError } = await supabase
         .from('posts')
-        .update({
-          ads_link: item.shortLink,
-          notes: appendNotes(post.notes, importedNotes),
-          status: postStatus,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', post.id)
         .select('id,post_date,time_slot,caption,ads_link')
 

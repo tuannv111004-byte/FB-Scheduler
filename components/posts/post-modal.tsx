@@ -176,7 +176,7 @@ export function PostModal({
         imageUrl: '',
         caption: '',
         adsLink: '',
-        status: 'scheduled',
+        status: 'draft',
         notes: '',
       })
     }

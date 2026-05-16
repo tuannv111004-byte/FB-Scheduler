@@ -17,7 +17,7 @@ const statusConfig: Record<PostStatus, { label: string; className: string }> = {
   },
   ready: {
     label: 'Ready',
-    className: 'bg-emerald-500/20 text-emerald-400',
+    className: 'bg-yellow-500/20 text-yellow-400',
   },
   due_now: {
     label: 'Due Now',

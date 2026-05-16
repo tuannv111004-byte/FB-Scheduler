@@ -570,7 +570,7 @@ export function ScheduleBoard() {
                                 post.status === 'late' && 'border-red-500/40 shadow-red-500/10',
                                 post.status === 'due_now' && 'border-amber-500/40 shadow-amber-500/10',
                                 post.status === 'scheduled' && 'border-blue-500/40 shadow-blue-500/10',
-                                post.status === 'ready' && 'border-emerald-500/40 shadow-emerald-500/10',
+                                post.status === 'ready' && 'border-yellow-500/40 shadow-yellow-500/10',
                                 post.status === 'draft' && 'border-border bg-secondary'
                               )}
                               onClick={() => handleEditPost(post)}
@@ -651,6 +651,10 @@ export function ScheduleBoard() {
             <div className="flex items-center gap-1">
               <div className="h-2 w-2 rounded-full bg-blue-400" />
               <span className="text-xs text-muted-foreground">Scheduled</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="h-2 w-2 rounded-full bg-yellow-400" />
+              <span className="text-xs text-muted-foreground">Ready</span>
             </div>
             <div className="flex items-center gap-1">
               <div className="h-2 w-2 rounded-full bg-amber-400" />

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -8,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
+import { StatusBadge } from '@/components/status-badge'
 import {
   Select,
   SelectContent,
@@ -17,11 +19,10 @@ import {
 } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { useAppStore } from '@/lib/store'
-import type { Post } from '@/lib/types'
+import type { Post, PostStatus } from '@/lib/types'
 import {
   Bold,
   Clipboard,
-  Code2,
   Eye,
   Heading2,
   Image as ImageIcon,
@@ -33,11 +34,25 @@ import {
   Wand2,
 } from 'lucide-react'
 
+const TinyMceHtmlEditor = dynamic(
+  () => import('@/components/composer/tinymce-html-editor').then((mod) => mod.TinyMceHtmlEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[420px] items-center justify-center rounded-md border border-border bg-secondary text-sm text-muted-foreground">
+        Loading editor...
+      </div>
+    ),
+  }
+)
+
 type ArticleDraft = {
   title: string
   description: string
   image: string
   descriptionImage: string
+  sourcePostId: string
+  postCaption: string
 }
 
 const emptyDraft: ArticleDraft = {
@@ -45,6 +60,8 @@ const emptyDraft: ArticleDraft = {
   description: '',
   image: '',
   descriptionImage: '',
+  sourcePostId: '',
+  postCaption: '',
 }
 
 function createDraft(overrides: Partial<ArticleDraft> = {}): ArticleDraft {
@@ -73,18 +90,6 @@ function isLikelyHeading(block: string, index: number) {
 
   const capitalizedWords = words.filter((word) => /^[A-Z0-9]/.test(word))
   return capitalizedWords.length / words.length >= 0.55
-}
-
-function plainTextToHtml(value: string) {
-  return value
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block, index) => {
-      const escapedBlock = escapeHtml(block).replaceAll('\n', '<br>')
-      return isLikelyHeading(block, index) ? `<h2>${escapedBlock}</h2>` : `<p>${escapedBlock}</p>`
-    })
-    .join('')
 }
 
 function getWordCount(description: string) {
@@ -122,6 +127,16 @@ function isBlankDraft(draft: ArticleDraft) {
 }
 
 const titlePrefixPreferencesStorageKey = 'postops:composer-title-prefix'
+const postStatusOptions: Array<PostStatus | 'all'> = [
+  'all',
+  'draft',
+  'scheduled',
+  'ready',
+  'due_now',
+  'posted',
+  'late',
+  'skipped',
+]
 
 type TitlePrefixPreferences = {
   enabled?: boolean
@@ -169,6 +184,12 @@ function buildJson(drafts: ArticleDraft[], titlePrefix: string, titlePrefixEnabl
       title: ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled),
       description: draft.description.trim(),
       image: draft.image.trim(),
+      ...(draft.sourcePostId.trim()
+        ? { schedulerPostId: draft.sourcePostId.trim() }
+        : {}),
+      ...(draft.postCaption.trim()
+        ? { caption: draft.postCaption.trim() }
+        : {}),
       ...(draft.descriptionImage.trim()
         ? { descriptionImage: draft.descriptionImage.trim() }
         : {}),
@@ -189,6 +210,8 @@ function normalizeImportedDraft(item: unknown): ArticleDraft {
     description: typeof record.description === 'string' ? record.description : '',
     image: typeof record.image === 'string' ? record.image : '',
     descriptionImage: typeof record.descriptionImage === 'string' ? record.descriptionImage : '',
+    sourcePostId: typeof record.sourcePostId === 'string' ? record.sourcePostId : '',
+    postCaption: typeof record.postCaption === 'string' ? record.postCaption : '',
   })
 }
 
@@ -198,9 +221,10 @@ export function ArticleComposer() {
   const storeSelectedDate = useAppStore((state) => state.selectedDate)
   const [drafts, setDrafts] = useState<ArticleDraft[]>([createDraft()])
   const [activeIndex, setActiveIndex] = useState(0)
-  const [plainText, setPlainText] = useState('')
   const [jsonInput, setJsonInput] = useState('')
   const [sourcePageId, setSourcePageId] = useState('all')
+  const [sourceStatus, setSourceStatus] = useState<PostStatus | 'all'>('draft')
+  const [sourceShowAll, setSourceShowAll] = useState(false)
   const [sourceDate, setSourceDate] = useState(storeSelectedDate)
   const [sourceStartTime, setSourceStartTime] = useState('00:00')
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([])
@@ -220,21 +244,34 @@ export function ArticleComposer() {
 
     return posts
       .filter((post) => {
-        if (post.postDate !== sourceDate) return false
+        if (!sourceShowAll && post.postDate !== sourceDate) return false
         if (sourcePageId !== 'all' && post.pageId !== sourcePageId) return false
+        if (sourceStatus !== 'all' && post.status !== sourceStatus) return false
         if (!post.imageUrl && !post.imagePath) return false
+
+        if (sourceShowAll) return true
 
         const postMinutes = parseTimeSlotMinutes(post.timeSlot)
         return postMinutes === null || postMinutes >= startMinutes
       })
       .sort(comparePostsBySchedule)
-  }, [posts, sourceDate, sourcePageId, sourceStartTime])
+  }, [posts, sourceDate, sourcePageId, sourceShowAll, sourceStartTime, sourceStatus])
 
   const selectedSourcePosts = useMemo(
     () => sourceCandidates.filter((post) => selectedPostIds.includes(post.id)),
     [sourceCandidates, selectedPostIds]
   )
+  const activeSourcePost = useMemo(
+    () => posts.find((post) => post.id === activeDraft.sourcePostId),
+    [activeDraft.sourcePostId, posts]
+  )
+  const captionTargetPosts = useMemo(() => {
+    if (!activeSourcePost || sourceCandidates.some((post) => post.id === activeSourcePost.id)) {
+      return sourceCandidates
+    }
 
+    return [activeSourcePost, ...sourceCandidates].sort(comparePostsBySchedule)
+  }, [activeSourcePost, sourceCandidates])
   const getPageName = (pageId: string) => {
     return pages.find((page) => page.id === pageId)?.name ?? 'Unknown page'
   }
@@ -257,7 +294,6 @@ export function ArticleComposer() {
       setActiveIndex(next.length - 1)
       return next
     })
-    setPlainText('')
   }
 
   const toggleSourcePost = (postId: string) => {
@@ -288,6 +324,8 @@ export function ArticleComposer() {
     const newDrafts = selectedSourcePosts.map((post) =>
       createDraft({
         image: post.imageUrl ?? post.imagePath ?? '',
+        sourcePostId: post.id,
+        postCaption: post.caption,
       })
     )
 
@@ -297,7 +335,6 @@ export function ArticleComposer() {
       setActiveIndex(shouldReplaceBlank ? 0 : current.length)
       return next
     })
-    setPlainText('')
     toast({ title: `${newDrafts.length} element${newDrafts.length > 1 ? 's' : ''} created` })
   }
 
@@ -305,23 +342,17 @@ export function ArticleComposer() {
     if (drafts.length === 1) {
       setDrafts([createDraft()])
       setActiveIndex(0)
-      setPlainText('')
       return
     }
 
     setDrafts((current) => current.filter((_, index) => index !== activeIndex))
     setActiveIndex((current) => Math.max(0, current - 1))
-    setPlainText('')
   }
 
   const insertHtml = (snippet: string) => {
     updateActiveDraft({
       description: `${activeDraft.description}${activeDraft.description ? '\n' : ''}${snippet}`,
     })
-  }
-
-  const convertPlainText = () => {
-    updateActiveDraft({ description: plainTextToHtml(plainText) })
   }
 
   const copyJson = async () => {
@@ -345,7 +376,6 @@ export function ArticleComposer() {
 
     setDrafts(importedDrafts)
     setActiveIndex(0)
-    setPlainText('')
   }
 
   const handleImportJson = () => {
@@ -411,7 +441,6 @@ export function ArticleComposer() {
                       type="button"
                       onClick={() => {
                         setActiveIndex(index)
-                        setPlainText('')
                       }}
                       className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
                         index === activeIndex
@@ -493,31 +522,66 @@ export function ArticleComposer() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="composer-description">Description HTML</Label>
-                    <span className="text-xs text-muted-foreground">{wordCount} words</span>
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <div className="space-y-2">
+                    <Label>Caption target post</Label>
+                    <Select
+                      value={activeDraft.sourcePostId || 'none'}
+                      onValueChange={(value) => {
+                        const post = posts.find((item) => item.id === value)
+                        updateActiveDraft({
+                          sourcePostId: value === 'none' ? '' : value,
+                          postCaption: value === 'none' ? '' : post?.caption ?? '',
+                        })
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select post" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No post</SelectItem>
+                        {captionTargetPosts.map((post) => (
+                          <SelectItem key={post.id} value={post.id}>
+                            {post.postDate} {post.timeSlot} - {getPageName(post.pageId)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {activeSourcePost ? (
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <StatusBadge status={activeSourcePost.status} size="sm" />
+                        <span>{activeSourcePost.adsLink ? 'Has ads link' : 'No ads link'}</span>
+                      </div>
+                    ) : null}
                   </div>
-                  <Textarea
-                    id="composer-description"
-                    value={activeDraft.description}
-                    onChange={(event) => updateActiveDraft({ description: event.target.value })}
-                    className="h-[360px] resize-none overflow-y-auto font-mono text-sm"
-                    placeholder="<p>Article content...</p>"
-                  />
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="composer-post-caption">Post caption</Label>
+                      <span className="text-xs text-muted-foreground">
+                        {activeDraft.postCaption.trim().length} chars
+                      </span>
+                    </div>
+                    <Textarea
+                      id="composer-post-caption"
+                      value={activeDraft.postCaption}
+                      onChange={(event) => updateActiveDraft({ postCaption: event.target.value })}
+                      className="h-24 resize-none overflow-y-auto"
+                      placeholder="Caption to save into the selected Scheduler post..."
+                      disabled={!activeDraft.sourcePostId}
+                    />
+                  </div>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-                  <Textarea
-                    value={plainText}
-                    onChange={(event) => setPlainText(event.target.value)}
-                    className="h-28 resize-none overflow-y-auto"
-                    placeholder="Paste plain text..."
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Description editor</Label>
+                    <span className="text-xs text-muted-foreground">{wordCount} words</span>
+                  </div>
+                  <TinyMceHtmlEditor
+                    value={activeDraft.description}
+                    onChange={(description) => updateActiveDraft({ description })}
                   />
-                  <Button type="button" variant="secondary" className="lg:self-end" onClick={convertPlainText}>
-                    <Code2 className="mr-2 h-4 w-4" />
-                    Convert HTML
-                  </Button>
                 </div>
               </div>
             </div>
@@ -563,30 +627,71 @@ export function ArticleComposer() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="source-date">Date</Label>
-                  <Input
-                    id="source-date"
-                    type="date"
-                    value={sourceDate}
-                    onChange={(event) => {
-                      setSourceDate(event.target.value)
-                      setSelectedPostIds([])
-                    }}
-                  />
-                </div>
+                {!sourceShowAll && (
+                  <div className="space-y-2">
+                    <Label htmlFor="source-date">Date</Label>
+                    <Input
+                      id="source-date"
+                      type="date"
+                      value={sourceDate}
+                      onChange={(event) => {
+                        setSourceDate(event.target.value)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="source-start-time">Start time</Label>
-                  <Input
-                    id="source-start-time"
-                    type="time"
-                    value={sourceStartTime}
-                    onChange={(event) => {
-                      setSourceStartTime(event.target.value)
+                  <Label>Status</Label>
+                  <Select
+                    value={sourceStatus}
+                    onValueChange={(value) => {
+                      setSourceStatus(value as PostStatus | 'all')
                       setSelectedPostIds([])
                     }}
-                  />
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Post status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {postStatusOptions.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status === 'all'
+                            ? 'All statuses'
+                            : status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {!sourceShowAll && (
+                  <div className="space-y-2">
+                    <Label htmlFor="source-start-time">Start time</Label>
+                    <Input
+                      id="source-start-time"
+                      type="time"
+                      value={sourceStartTime}
+                      onChange={(event) => {
+                        setSourceStartTime(event.target.value)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-end">
+                  <label className="flex w-full items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+                    <span className="text-sm font-medium">Show all</span>
+                    <Switch
+                      checked={sourceShowAll}
+                      onCheckedChange={(checked) => {
+                        setSourceShowAll(checked)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </label>
                 </div>
 
                 <div className="flex items-end">
@@ -624,6 +729,7 @@ export function ArticleComposer() {
                         <div className="flex flex-wrap items-center gap-2 text-sm">
                           <span className="font-mono text-primary">{post.timeSlot}</span>
                           <span className="text-muted-foreground">{getPageName(post.pageId)}</span>
+                          <StatusBadge status={post.status} size="sm" />
                         </div>
                         <p className="truncate text-sm text-foreground">
                           {post.caption || 'No caption yet'}
