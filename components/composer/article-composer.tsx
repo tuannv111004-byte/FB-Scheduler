@@ -28,6 +28,7 @@ import {
   Image as ImageIcon,
   List,
   Pilcrow,
+  Plug,
   Plus,
   RotateCcw,
   Trash2,
@@ -127,6 +128,13 @@ function isBlankDraft(draft: ArticleDraft) {
 }
 
 const titlePrefixPreferencesStorageKey = 'postops:composer-title-prefix'
+const extensionSchedulerConfigStorageKey = 'postops:composer-extension-scheduler-config'
+const extensionPayloadStorageKey = 'postops:daily-feji-extension-payload'
+const composerStateStorageKey = 'postops:composer-state'
+const composerStateDbName = 'postops-composer'
+const composerStateStoreName = 'state'
+const extensionStartMessageType = 'POSTOPS_START_DAILY_FEJI'
+const extensionAckMessageType = 'POSTOPS_DAILY_FEJI_ACK'
 const postStatusOptions: Array<PostStatus | 'all'> = [
   'all',
   'draft',
@@ -137,10 +145,28 @@ const postStatusOptions: Array<PostStatus | 'all'> = [
   'late',
   'skipped',
 ]
+const allowedExtensionStatuses: PostStatus[] = ['draft', 'scheduled', 'ready']
 
 type TitlePrefixPreferences = {
   enabled?: boolean
   prefix?: string
+}
+
+type ExtensionSchedulerConfig = {
+  token?: string
+  status?: PostStatus
+}
+
+type SavedComposerState = {
+  drafts?: ArticleDraft[]
+  activeIndex?: number
+  jsonInput?: string
+  sourcePageId?: string
+  sourceStatus?: PostStatus | 'all'
+  sourceShowAll?: boolean
+  sourceDate?: string
+  sourceStartTime?: string
+  selectedPostIds?: string[]
 }
 
 function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
@@ -162,6 +188,74 @@ function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
   } catch {
     return { enabled: true, prefix: 'VT' }
   }
+}
+
+function readExtensionSchedulerConfig(): Required<ExtensionSchedulerConfig> {
+  if (typeof window === 'undefined') {
+    return { token: '', status: 'draft' }
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(extensionSchedulerConfigStorageKey)
+    const parsedValue = rawValue ? (JSON.parse(rawValue) as ExtensionSchedulerConfig) : {}
+
+    return {
+      token: parsedValue.token?.trim() || '',
+      status: parsedValue.status || 'draft',
+    }
+  } catch {
+    return { token: '', status: 'draft' }
+  }
+}
+
+function openComposerStateDb() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = window.indexedDB.open(composerStateDbName, 1)
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(composerStateStoreName)
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function readSavedComposerStateFromDb() {
+  const db = await openComposerStateDb()
+  return new Promise<SavedComposerState>((resolve, reject) => {
+    const request = db
+      .transaction(composerStateStoreName, 'readonly')
+      .objectStore(composerStateStoreName)
+      .get(composerStateStorageKey)
+
+    request.onsuccess = () => resolve((request.result as SavedComposerState | undefined) ?? {})
+    request.onerror = () => reject(request.error)
+  }).finally(() => db.close())
+}
+
+async function writeSavedComposerStateToDb(state: SavedComposerState) {
+  const db = await openComposerStateDb()
+  return new Promise<void>((resolve, reject) => {
+    const request = db
+      .transaction(composerStateStoreName, 'readwrite')
+      .objectStore(composerStateStoreName)
+      .put(state, composerStateStorageKey)
+
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  }).finally(() => db.close())
+}
+
+async function deleteSavedComposerStateFromDb() {
+  const db = await openComposerStateDb()
+  return new Promise<void>((resolve, reject) => {
+    const request = db
+      .transaction(composerStateStoreName, 'readwrite')
+      .objectStore(composerStateStoreName)
+      .delete(composerStateStorageKey)
+
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  }).finally(() => db.close())
 }
 
 function ensureTitlePrefix(title: string, prefix: string, enabled: boolean) {
@@ -219,11 +313,15 @@ export function ArticleComposer() {
   const posts = useAppStore((state) => state.posts)
   const pages = useAppStore((state) => state.pages)
   const storeSelectedDate = useAppStore((state) => state.selectedDate)
-  const [drafts, setDrafts] = useState<ArticleDraft[]>([createDraft()])
+  const [drafts, setDrafts] = useState<ArticleDraft[]>(
+    () => [createDraft()]
+  )
   const [activeIndex, setActiveIndex] = useState(0)
   const [jsonInput, setJsonInput] = useState('')
   const [sourcePageId, setSourcePageId] = useState('all')
-  const [sourceStatus, setSourceStatus] = useState<PostStatus | 'all'>('draft')
+  const [sourceStatus, setSourceStatus] = useState<PostStatus | 'all'>(
+    'draft'
+  )
   const [sourceShowAll, setSourceShowAll] = useState(false)
   const [sourceDate, setSourceDate] = useState(storeSelectedDate)
   const [sourceStartTime, setSourceStartTime] = useState('00:00')
@@ -232,6 +330,12 @@ export function ArticleComposer() {
     () => readTitlePrefixPreferences().enabled
   )
   const [titlePrefix, setTitlePrefix] = useState(() => readTitlePrefixPreferences().prefix)
+  const [extensionSchedulerToken, setExtensionSchedulerToken] = useState(
+    () => readExtensionSchedulerConfig().token
+  )
+  const [extensionSchedulerStatus, setExtensionSchedulerStatus] = useState<PostStatus>(
+    () => readExtensionSchedulerConfig().status
+  )
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
   const generatedJson = useMemo(
@@ -349,6 +453,21 @@ export function ArticleComposer() {
     setActiveIndex((current) => Math.max(0, current - 1))
   }
 
+  const resetComposer = () => {
+    window.localStorage.removeItem(composerStateStorageKey)
+    void deleteSavedComposerStateFromDb()
+    setDrafts([createDraft()])
+    setActiveIndex(0)
+    setJsonInput('')
+    setSourcePageId('all')
+    setSourceStatus('draft')
+    setSourceShowAll(false)
+    setSourceDate(storeSelectedDate)
+    setSourceStartTime('00:00')
+    setSelectedPostIds([])
+    toast({ title: 'Composer reset' })
+  }
+
   const insertHtml = (snippet: string) => {
     updateActiveDraft({
       description: `${activeDraft.description}${activeDraft.description ? '\n' : ''}${snippet}`,
@@ -358,6 +477,66 @@ export function ArticleComposer() {
   const copyJson = async () => {
     await navigator.clipboard.writeText(generatedJson)
     toast({ title: 'JSON copied' })
+  }
+
+  const prepareExtensionPayload = async () => {
+    const items = JSON.parse(generatedJson)
+    window.localStorage.setItem(
+      extensionPayloadStorageKey,
+      JSON.stringify({
+        createdAt: new Date().toISOString(),
+        items,
+      })
+    )
+
+    const acknowledged = await new Promise<boolean>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', handleAck)
+        resolve(false)
+      }, 1200)
+
+      function handleAck(event: MessageEvent) {
+        if (event.source !== window || event.data?.type !== extensionAckMessageType) return
+        window.clearTimeout(timeout)
+        window.removeEventListener('message', handleAck)
+        resolve(event.data.ok === true)
+      }
+
+      window.addEventListener('message', handleAck)
+      window.postMessage(
+        {
+          type: extensionStartMessageType,
+          payload: {
+            items,
+            options: {
+              imagePlacement: 'none',
+            },
+            scheduler: {
+              enabled: Boolean(extensionSchedulerToken.trim()),
+              schedulerUrl: window.location.origin,
+              token: extensionSchedulerToken.trim(),
+              status: extensionSchedulerStatus,
+            },
+          },
+        },
+        window.location.origin
+      )
+    })
+
+    if (acknowledged) {
+      toast({
+        title: 'Extension started',
+        description: `${items.length} item${items.length > 1 ? 's' : ''} sent to Daily Feji extension.`,
+      })
+      return
+    }
+
+    await navigator.clipboard.writeText(generatedJson)
+    toast({
+      title: 'Extension not detected',
+      description: 'JSON copied instead. Reload the Chrome extension, then try again.',
+      variant: 'destructive',
+    })
   }
 
   const copyDescription = async () => {
@@ -401,6 +580,78 @@ export function ArticleComposer() {
     )
   }, [titlePrefix, titlePrefixEnabled])
 
+  useEffect(() => {
+    let isCancelled = false
+    readSavedComposerStateFromDb()
+      .then((savedState) => {
+        if (isCancelled || !savedState.drafts?.length) return
+
+        setDrafts(savedState.drafts.map((draft) => createDraft(draft)))
+        setActiveIndex(savedState.activeIndex ?? 0)
+        setJsonInput(savedState.jsonInput ?? '')
+        setSourcePageId(savedState.sourcePageId ?? 'all')
+        setSourceStatus(savedState.sourceStatus ?? 'draft')
+        setSourceShowAll(savedState.sourceShowAll ?? false)
+        setSourceDate(savedState.sourceDate ?? storeSelectedDate)
+        setSourceStartTime(savedState.sourceStartTime ?? '00:00')
+        setSelectedPostIds(savedState.selectedPostIds ?? [])
+        window.localStorage.removeItem(composerStateStorageKey)
+      })
+      .catch(() => {
+        // Autosave restore is best-effort.
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [storeSelectedDate])
+
+  useEffect(() => {
+    if (activeIndex > drafts.length - 1) {
+      setActiveIndex(Math.max(0, drafts.length - 1))
+    }
+  }, [activeIndex, drafts.length])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void writeSavedComposerStateToDb({
+        drafts,
+        activeIndex,
+        jsonInput,
+        sourcePageId,
+        sourceStatus,
+        sourceShowAll,
+        sourceDate,
+        sourceStartTime,
+        selectedPostIds,
+      }).catch(() => {
+        // Autosave is best-effort; avoid breaking editing when browser storage is full.
+      })
+    }, 250)
+
+    return () => window.clearTimeout(timeout)
+  }, [
+    activeIndex,
+    drafts,
+    jsonInput,
+    selectedPostIds,
+    sourceDate,
+    sourcePageId,
+    sourceShowAll,
+    sourceStartTime,
+    sourceStatus,
+  ])
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      extensionSchedulerConfigStorageKey,
+      JSON.stringify({
+        token: extensionSchedulerToken.trim(),
+        status: extensionSchedulerStatus,
+      } satisfies ExtensionSchedulerConfig)
+    )
+  }, [extensionSchedulerStatus, extensionSchedulerToken])
+
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
@@ -427,6 +678,10 @@ export function ArticleComposer() {
               <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<ul><li>Item</li></ul>')}>
                 <List className="mr-2 h-4 w-4" />
                 List
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={resetComposer}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Reset
               </Button>
             </div>
           </CardHeader>
@@ -753,14 +1008,50 @@ export function ArticleComposer() {
           </Card>
 
           <Card className="border-border bg-card">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
               <CardTitle className="text-lg">JSON</CardTitle>
-              <Button type="button" size="sm" onClick={copyJson}>
-                <Clipboard className="mr-2 h-4 w-4" />
-                Copy
-              </Button>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" onClick={prepareExtensionPayload}>
+                  <Plug className="mr-2 h-4 w-4" />
+                  Extension
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={copyJson}>
+                  <Clipboard className="mr-2 h-4 w-4" />
+                  Copy
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
+                <div className="space-y-2">
+                  <Label htmlFor="extension-scheduler-token">Import token</Label>
+                  <Input
+                    id="extension-scheduler-token"
+                    type="password"
+                    value={extensionSchedulerToken}
+                    onChange={(event) => setExtensionSchedulerToken(event.target.value)}
+                    placeholder="EXTENSION_IMPORT_TOKEN"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Select
+                    value={extensionSchedulerStatus}
+                    onValueChange={(value) => setExtensionSchedulerStatus(value as PostStatus)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allowedExtensionStatuses.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               <Textarea value={generatedJson} readOnly className="h-[320px] resize-none overflow-y-auto font-mono text-xs" />
             </CardContent>
           </Card>

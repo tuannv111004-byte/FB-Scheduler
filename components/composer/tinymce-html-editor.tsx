@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Editor } from '@tinymce/tinymce-react'
-import tinymce from 'tinymce/tinymce'
+import 'tinymce/tinymce'
 import 'tinymce/icons/default'
 import 'tinymce/models/dom'
 import 'tinymce/themes/silver'
@@ -34,7 +34,6 @@ export function TinyMceHtmlEditor({ value, onChange }: TinyMceHtmlEditorProps) {
       ) : null}
       <div className={isReady ? 'block' : 'hidden'}>
         <Editor
-          tinymce={tinymce}
           licenseKey="gpl"
           value={value}
           onInit={() => setIsReady(true)}

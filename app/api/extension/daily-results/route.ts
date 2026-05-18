@@ -11,6 +11,7 @@ type DailyResultItem = {
   dailyLink?: unknown
   shortLink?: unknown
   domain?: unknown
+  cleanupImageUrls?: unknown
   status?: unknown
   error?: unknown
 }
@@ -34,6 +35,7 @@ type ExistingPostRow = {
   id: string
   post_date: string
   time_slot: string
+  image_url: string | null
   status: PostStatus
   ads_link: string | null
   notes: string | null
@@ -67,6 +69,12 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 
 function readString(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(readString).filter(Boolean)
+    : []
 }
 
 function parseTimeSlotMinutes(timeSlot: string) {
@@ -161,6 +169,43 @@ function appendNotes(currentNotes: string | null, importedNotes: string) {
   return [currentNotes?.trim() ?? '', importedNotes.trim()].filter(Boolean).join('\n\n')
 }
 
+function getPostImageStoragePath(imageUrl: string, protectedImageUrl: string | null) {
+  if (!imageUrl || imageUrl === protectedImageUrl) return null
+
+  try {
+    const url = new URL(imageUrl)
+    const marker = '/storage/v1/object/public/post-images/'
+    const markerIndex = url.pathname.indexOf(marker)
+    if (markerIndex < 0) return null
+
+    const storagePath = decodeURIComponent(url.pathname.slice(markerIndex + marker.length))
+    if (!storagePath || storagePath.includes('..') || storagePath.startsWith('/')) return null
+    return storagePath
+  } catch {
+    return null
+  }
+}
+
+async function cleanupDescriptionImages(
+  supabase: ReturnType<typeof createServerSupabaseClient>,
+  item: NormalizedDailyItem,
+  post: ExistingPostRow
+) {
+  const storagePaths = [
+    ...new Set(
+      item.cleanupImageUrls
+        .map((url) => getPostImageStoragePath(url, post.image_url))
+        .filter((path): path is string => Boolean(path))
+    ),
+  ]
+
+  if (storagePaths.length === 0) return []
+
+  const { error } = await supabase.storage.from('post-images').remove(storagePaths)
+  if (error) throw error
+  return storagePaths
+}
+
 type NormalizedDailyItem = {
   title: string
   image: string
@@ -169,6 +214,7 @@ type NormalizedDailyItem = {
   dailyLink: string
   shortLink: string
   domain: string
+  cleanupImageUrls: string[]
 }
 
 function normalizeItems(value: unknown) {
@@ -194,6 +240,7 @@ function normalizeItems(value: unknown) {
       dailyLink: readString(item.dailyLink),
       shortLink: readString(item.shortLink),
       domain: readString(item.domain),
+      cleanupImageUrls: readStringArray(item.cleanupImageUrls),
     }
 
     if (!normalizedItem.title) errors.push(`Item ${index + 1}: title is required.`)
@@ -309,80 +356,105 @@ export async function POST(request: Request) {
     const postStatus: PostStatus = allowedStatuses.includes(postStatusValue as PostStatus)
       ? (postStatusValue as PostStatus)
       : 'draft'
+    const items = normalizeItems(payload.items)
+    const itemsWithoutPostId = items.filter((item) => !item.schedulerPostId)
+    const requiresScheduleLookup = itemsWithoutPostId.length > 0
 
-    if (!pageId) {
+    if (requiresScheduleLookup && !pageId) {
       return jsonResponse({ error: 'pageId is required.' }, { status: 400 })
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    if (requiresScheduleLookup && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
       return jsonResponse({ error: 'startDate must use YYYY-MM-DD format.' }, { status: 400 })
     }
 
-    const items = normalizeItems(payload.items)
     const supabase = createServerSupabaseClient()
+    let existingPosts: ExistingPostRow[] = []
+    let candidatePosts: ExistingPostRow[] = []
 
-    const { data: pageData, error: pageError } = await supabase
-      .from('pages')
-      .select('id,time_slots')
-      .eq('id', pageId)
-      .single()
+    if (requiresScheduleLookup) {
+      const { data: pageData, error: pageError } = await supabase
+        .from('pages')
+        .select('id,time_slots')
+        .eq('id', pageId)
+        .single()
 
-    if (pageError) throw pageError
+      if (pageError) throw pageError
 
-    const page = pageData as PageRow
-    const sortedSlots = [...(page.time_slots ?? [])].sort((first, second) => {
-      const firstMinutes = parseTimeSlotMinutes(first)
-      const secondMinutes = parseTimeSlotMinutes(second)
+      const page = pageData as PageRow
+      const sortedSlots = [...(page.time_slots ?? [])].sort((first, second) => {
+        const firstMinutes = parseTimeSlotMinutes(first)
+        const secondMinutes = parseTimeSlotMinutes(second)
 
-      if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
-        return firstMinutes - secondMinutes
+        if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+          return firstMinutes - secondMinutes
+        }
+
+        return first.localeCompare(second)
+      })
+
+      if (sortedSlots.length === 0) {
+        return jsonResponse({ error: 'Selected page has no time slots configured.' }, { status: 400 })
       }
 
-      return first.localeCompare(second)
-    })
+      const { data: existingPostsData, error: postsError } = await supabase
+        .from('posts')
+        .select('id,post_date,time_slot,image_url,status,ads_link,notes')
+        .eq('page_id', pageId)
 
-    if (sortedSlots.length === 0) {
-      return jsonResponse({ error: 'Selected page has no time slots configured.' }, { status: 400 })
-    }
+      if (postsError) throw postsError
 
-    const { data: existingPostsData, error: postsError } = await supabase
-      .from('posts')
-      .select('id,post_date,time_slot,status,ads_link,notes')
-      .eq('page_id', pageId)
+      const startPosition = resolveStartPosition(sortedSlots, startDate, startTimeSlot)
+      const startDateForSearch = startPosition.targetDate
+      const startTimeSlotForSearch = sortedSlots[startPosition.slotIndex]
 
-    if (postsError) throw postsError
-
-    const startPosition = resolveStartPosition(sortedSlots, startDate, startTimeSlot)
-    const startDateForSearch = startPosition.targetDate
-    const startTimeSlotForSearch = sortedSlots[startPosition.slotIndex]
-
-    const existingPosts = ((existingPostsData as ExistingPostRow[] | null) ?? []).sort((first, second) =>
-      compareSchedule(first.post_date, first.time_slot, second.post_date, second.time_slot)
-    )
-
-    const candidatePosts = existingPosts.filter((post) => {
-      if (post.status === 'skipped') return false
-      if (!sortedSlots.includes(post.time_slot)) return false
-
-      return compareSchedule(
-        post.post_date,
-        post.time_slot,
-        startDateForSearch,
-        startTimeSlotForSearch
-      ) >= 0
-    })
-
-    const itemsWithoutPostId = items.filter((item) => !item.schedulerPostId)
-
-    if (candidatePosts.length < itemsWithoutPostId.length) {
-      return jsonResponse(
-        {
-          error: `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${itemsWithoutPostId.length}, found ${candidatePosts.length}.`,
-        },
-        { status: 400 }
+      existingPosts = ((existingPostsData as ExistingPostRow[] | null) ?? []).sort((first, second) =>
+        compareSchedule(first.post_date, first.time_slot, second.post_date, second.time_slot)
       )
+
+      candidatePosts = existingPosts.filter((post) => {
+        if (post.status === 'skipped') return false
+        if (!sortedSlots.includes(post.time_slot)) return false
+
+        return compareSchedule(
+          post.post_date,
+          post.time_slot,
+          startDateForSearch,
+          startTimeSlotForSearch
+        ) >= 0
+      })
+
+      if (candidatePosts.length < itemsWithoutPostId.length) {
+        return jsonResponse(
+          {
+            error: `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${itemsWithoutPostId.length}, found ${candidatePosts.length}.`,
+          },
+          { status: 400 }
+        )
+      }
+    } else {
+      const postIds = [...new Set(items.map((item) => item.schedulerPostId).filter(Boolean))]
+      const { data: existingPostsData, error: postsError } = await supabase
+        .from('posts')
+        .select('id,post_date,time_slot,image_url,status,ads_link,notes')
+        .in('id', postIds)
+
+      if (postsError) throw postsError
+      existingPosts = (existingPostsData as ExistingPostRow[] | null) ?? []
+
+      const foundPostIds = new Set(existingPosts.map((post) => post.id))
+      const missingPostIds = postIds.filter((postId) => !foundPostIds.has(postId))
+      if (missingPostIds.length > 0) {
+        return jsonResponse(
+          {
+            error: `Post IDs were not found in this Scheduler database: ${missingPostIds.join(', ')}.`,
+          },
+          { status: 400 }
+        )
+      }
     }
 
     const updatedRows = []
+    const cleanedImagePaths: string[] = []
     let candidatePostIndex = 0
 
     for (let index = 0; index < items.length; index += 1) {
@@ -395,7 +467,7 @@ export async function POST(request: Request) {
         return jsonResponse(
           {
             error: item.schedulerPostId
-              ? `Post ${item.schedulerPostId} was not found for the selected page.`
+              ? `Post ${item.schedulerPostId} was not found in this Scheduler database.`
               : `No scheduled post found for item ${index + 1}.`,
           },
           { status: 400 }
@@ -430,10 +502,14 @@ export async function POST(request: Request) {
       if (updatedPostRows?.[0]) {
         updatedRows.push(updatedPostRows[0])
       }
+
+      const cleanedPaths = await cleanupDescriptionImages(supabase, item, post)
+      cleanedImagePaths.push(...cleanedPaths)
     }
 
     return jsonResponse({
       updated: updatedRows.length,
+      cleanedImages: cleanedImagePaths.length,
       posts: updatedRows,
     })
   } catch (error) {
