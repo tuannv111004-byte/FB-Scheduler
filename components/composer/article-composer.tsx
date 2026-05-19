@@ -21,6 +21,7 @@ import { toast } from '@/hooks/use-toast'
 import { useAppStore } from '@/lib/store'
 import type { Post, PostStatus } from '@/lib/types'
 import {
+  AlertTriangle,
   Bold,
   Clipboard,
   Eye,
@@ -125,6 +126,32 @@ function comparePostsBySchedule(first: Post, second: Post) {
 
 function isBlankDraft(draft: ArticleDraft) {
   return !draft.title && !draft.description && !draft.image && !draft.descriptionImage
+}
+
+function getDraftWarnings(draft: ArticleDraft) {
+  const warnings: string[] = []
+
+  if (!draft.title.trim()) {
+    warnings.push('Missing article title')
+  }
+
+  if (!draft.description.trim()) {
+    warnings.push('Missing article description')
+  }
+
+  if (!draft.image.trim()) {
+    warnings.push('Missing thumbnail image URL')
+  }
+
+  if (!draft.sourcePostId.trim()) {
+    warnings.push('Missing Scheduler target post')
+  }
+
+  if (draft.sourcePostId.trim() && !draft.postCaption.trim()) {
+    warnings.push('Missing Facebook post caption')
+  }
+
+  return warnings
 }
 
 const titlePrefixPreferencesStorageKey = 'postops:composer-title-prefix'
@@ -336,8 +363,21 @@ export function ArticleComposer() {
   const [extensionSchedulerStatus, setExtensionSchedulerStatus] = useState<PostStatus>(
     () => readExtensionSchedulerConfig().status
   )
+  const [validationPulse, setValidationPulse] = useState(0)
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
+  const activeDraftWarnings = useMemo(() => getDraftWarnings(activeDraft), [activeDraft])
+  const draftWarningCounts = useMemo(
+    () => drafts.map((draft) => getDraftWarnings(draft).length),
+    [drafts]
+  )
+  const showActiveValidation = validationPulse > 0 && activeDraftWarnings.length > 0
+  const isMissingTitle = showActiveValidation && !activeDraft.title.trim()
+  const isMissingDescription = showActiveValidation && !activeDraft.description.trim()
+  const isMissingThumbnail = showActiveValidation && !activeDraft.image.trim()
+  const isMissingTargetPost = showActiveValidation && !activeDraft.sourcePostId.trim()
+  const isMissingPostCaption =
+    showActiveValidation && Boolean(activeDraft.sourcePostId.trim()) && !activeDraft.postCaption.trim()
   const generatedJson = useMemo(
     () => buildJson(drafts, titlePrefix, titlePrefixEnabled),
     [drafts, titlePrefix, titlePrefixEnabled]
@@ -480,6 +520,38 @@ export function ArticleComposer() {
   }
 
   const prepareExtensionPayload = async () => {
+    const invalidDraftIndexes = drafts
+      .map((draft, index) => (getDraftWarnings(draft).length > 0 ? index : -1))
+      .filter((index) => index >= 0)
+
+    if (invalidDraftIndexes.length > 0) {
+      setValidationPulse(Date.now())
+      setActiveIndex(invalidDraftIndexes[0])
+      toast({
+        title: 'Missing important fields',
+        description: `Fix ${invalidDraftIndexes.length} element${
+          invalidDraftIndexes.length > 1 ? 's' : ''
+        } before sending to the extension.`,
+        variant: 'destructive',
+      })
+      return
+    }
+
+    const schedulerToken = extensionSchedulerToken.trim()
+    if (!schedulerToken) {
+      const shouldContinue = window.confirm(
+        'Import token is empty. The extension can still create Daily/Feji posts, but results will not sync back to Scheduler. Continue without sync?'
+      )
+
+      if (!shouldContinue) {
+        toast({
+          title: 'Extension cancelled',
+          description: 'Add an import token if you want results to sync back to Scheduler.',
+        })
+        return
+      }
+    }
+
     const items = JSON.parse(generatedJson)
     window.localStorage.setItem(
       extensionPayloadStorageKey,
@@ -512,9 +584,9 @@ export function ArticleComposer() {
               imagePlacement: 'none',
             },
             scheduler: {
-              enabled: Boolean(extensionSchedulerToken.trim()),
+              enabled: Boolean(schedulerToken),
               schedulerUrl: window.location.origin,
-              token: extensionSchedulerToken.trim(),
+              token: schedulerToken,
               status: extensionSchedulerStatus,
             },
           },
@@ -654,6 +726,17 @@ export function ArticleComposer() {
 
   return (
     <div className="space-y-6">
+      <style>
+        {`
+          @keyframes composer-shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-5px); }
+            40% { transform: translateX(5px); }
+            60% { transform: translateX(-3px); }
+            80% { transform: translateX(3px); }
+          }
+        `}
+      </style>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
         <Card className="border-border bg-card">
           <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -690,27 +773,43 @@ export function ArticleComposer() {
               <div className="space-y-2">
                 <Label>Elements</Label>
                 <div className="max-h-[440px] space-y-2 overflow-y-auto pr-1">
-                  {drafts.map((draft, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => {
-                        setActiveIndex(index)
-                      }}
-                      className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                        index === activeIndex
+                  {drafts.map((draft, index) => {
+                    const warningCount = draftWarningCounts[index] ?? 0
+                    const shouldShake = validationPulse > 0 && warningCount > 0
+
+                    return (
+                      <button
+                        key={`${index}-${shouldShake ? validationPulse : 'idle'}`}
+                        type="button"
+                        onClick={() => {
+                          setActiveIndex(index)
+                        }}
+                        className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                          shouldShake
+                            ? 'border-red-500 bg-red-500/10 text-red-700 shadow-sm shadow-red-500/20 dark:text-red-300'
+                            : index === activeIndex
                           ? 'border-primary bg-primary/10 text-primary'
                           : 'border-border text-muted-foreground hover:bg-accent'
                       }`}
-                    >
-                      <span className="block font-medium">Element {index + 1}</span>
-                      <span className="block truncate text-xs">
-                        {draft.title
-                          ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
-                          : 'Untitled'}
-                      </span>
-                    </button>
-                  ))}
+                        style={shouldShake ? { animation: 'composer-shake 260ms ease-in-out' } : undefined}
+                      >
+                        <span className="flex items-center justify-between gap-2 font-medium">
+                          <span>Element {index + 1}</span>
+                          {warningCount > 0 ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                              <AlertTriangle className="h-3 w-3" />
+                              {warningCount}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="block truncate text-xs">
+                          {draft.title
+                            ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
+                            : 'Untitled'}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
                 <Button type="button" variant="outline" size="sm" className="w-full" onClick={removeActiveElement}>
                   <Trash2 className="mr-2 h-4 w-4" />
@@ -745,6 +844,33 @@ export function ArticleComposer() {
                   </div>
                 </div>
 
+                {activeDraftWarnings.length > 0 ? (
+                  <div
+                    key={validationPulse > 0 ? validationPulse : 'warning-panel'}
+                    className={`rounded-md border p-3 text-sm ${
+                      validationPulse > 0
+                        ? 'border-red-500 bg-red-500/10 shadow-sm shadow-red-500/20'
+                        : 'border-amber-500/30 bg-amber-500/10'
+                    }`}
+                    style={validationPulse > 0 ? { animation: 'composer-shake 260ms ease-in-out' } : undefined}
+                  >
+                    <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200">
+                      <AlertTriangle className="h-4 w-4" />
+                      Important fields are missing
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {activeDraftWarnings.map((warning) => (
+                        <span
+                          key={warning}
+                          className="rounded-full border border-amber-500/30 bg-background/70 px-2.5 py-1 text-xs text-amber-800 dark:text-amber-200"
+                        >
+                          {warning}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label htmlFor="composer-title">Title</Label>
                   <Input
@@ -753,6 +879,7 @@ export function ArticleComposer() {
                     onChange={(event) => updateActiveDraft({ title: event.target.value })}
                     onBlur={normalizeActiveTitle}
                     placeholder="Article title"
+                    className={isMissingTitle ? 'border-red-500 ring-1 ring-red-500' : undefined}
                   />
                 </div>
 
@@ -764,6 +891,7 @@ export function ArticleComposer() {
                       value={activeDraft.image}
                       onChange={(event) => updateActiveDraft({ image: event.target.value })}
                       placeholder="https://..."
+                      className={isMissingThumbnail ? 'border-red-500 ring-1 ring-red-500' : undefined}
                     />
                   </div>
                   <div className="space-y-2">
@@ -790,7 +918,7 @@ export function ArticleComposer() {
                         })
                       }}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className={`w-full ${isMissingTargetPost ? 'border-red-500 ring-1 ring-red-500' : ''}`}>
                         <SelectValue placeholder="Select post" />
                       </SelectTrigger>
                       <SelectContent>
@@ -821,7 +949,9 @@ export function ArticleComposer() {
                       id="composer-post-caption"
                       value={activeDraft.postCaption}
                       onChange={(event) => updateActiveDraft({ postCaption: event.target.value })}
-                      className="h-24 resize-none overflow-y-auto"
+                      className={`h-24 resize-none overflow-y-auto ${
+                        isMissingPostCaption ? 'border-red-500 ring-1 ring-red-500' : ''
+                      }`}
                       placeholder="Caption to save into the selected Scheduler post..."
                       disabled={!activeDraft.sourcePostId}
                     />
@@ -833,10 +963,12 @@ export function ArticleComposer() {
                     <Label>Description editor</Label>
                     <span className="text-xs text-muted-foreground">{wordCount} words</span>
                   </div>
-                  <TinyMceHtmlEditor
-                    value={activeDraft.description}
-                    onChange={(description) => updateActiveDraft({ description })}
-                  />
+                  <div className={isMissingDescription ? 'rounded-md border border-red-500 ring-1 ring-red-500' : undefined}>
+                    <TinyMceHtmlEditor
+                      value={activeDraft.description}
+                      onChange={(description) => updateActiveDraft({ description })}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
