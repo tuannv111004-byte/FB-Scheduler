@@ -561,17 +561,20 @@ export function ArticleComposer() {
       })
     )
 
-    const acknowledged = await new Promise<boolean>((resolve) => {
+    const extensionAck = await new Promise<{ ok: boolean; error: string }>((resolve) => {
       const timeout = window.setTimeout(() => {
         window.removeEventListener('message', handleAck)
-        resolve(false)
+        resolve({ ok: false, error: '' })
       }, 1200)
 
       function handleAck(event: MessageEvent) {
         if (event.source !== window || event.data?.type !== extensionAckMessageType) return
         window.clearTimeout(timeout)
         window.removeEventListener('message', handleAck)
-        resolve(event.data.ok === true)
+        resolve({
+          ok: event.data.ok === true,
+          error: String(event.data.error || ''),
+        })
       }
 
       window.addEventListener('message', handleAck)
@@ -595,7 +598,7 @@ export function ArticleComposer() {
       )
     })
 
-    if (acknowledged) {
+    if (extensionAck.ok) {
       toast({
         title: 'Extension started',
         description: `${items.length} item${items.length > 1 ? 's' : ''} sent to Daily Feji extension.`,
@@ -605,8 +608,10 @@ export function ArticleComposer() {
 
     await navigator.clipboard.writeText(generatedJson)
     toast({
-      title: 'Extension not detected',
-      description: 'JSON copied instead. Reload the Chrome extension, then try again.',
+      title: extensionAck.error ? 'Extension error' : 'Extension not detected',
+      description: extensionAck.error
+        ? `${extensionAck.error}. JSON copied instead.`
+        : 'JSON copied instead. Reload the Chrome extension, then try again.',
       variant: 'destructive',
     })
   }
