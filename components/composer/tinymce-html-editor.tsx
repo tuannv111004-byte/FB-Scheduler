@@ -23,10 +23,10 @@ export function TinyMceHtmlEditor({ value, onChange }: TinyMceHtmlEditorProps) {
   const [isReady, setIsReady] = useState(false)
 
   return (
-    <div className="min-h-[420px]">
+    <div className="min-h-[560px]">
       {!isReady ? (
         <textarea
-          className="min-h-[420px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="min-h-[560px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           placeholder="Paste or edit article HTML here..."
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -39,7 +39,7 @@ export function TinyMceHtmlEditor({ value, onChange }: TinyMceHtmlEditorProps) {
           onInit={() => setIsReady(true)}
           onEditorChange={onChange}
           init={{
-            height: 420,
+            height: 560,
             menubar: false,
             branding: false,
             promotion: false,

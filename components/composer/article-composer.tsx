@@ -9,6 +9,14 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { StatusBadge } from '@/components/status-badge'
 import {
   Select,
@@ -772,42 +780,271 @@ export function ArticleComposer() {
           }
         `}
       </style>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-        <Card className="border-border bg-card">
-          <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <CardTitle className="text-lg">Draft</CardTitle>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={addElement}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Element
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<h2>Heading</h2>')}>
-                <Heading2 className="mr-2 h-4 w-4" />
-                H2
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<p>Paragraph...</p>')}>
-                <Pilcrow className="mr-2 h-4 w-4" />
-                P
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<p><strong>Bold text</strong></p>')}>
-                <Bold className="mr-2 h-4 w-4" />
-                Bold
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<ul><li>Item</li></ul>')}>
-                <List className="mr-2 h-4 w-4" />
-                List
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={resetComposer}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Reset
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-              <div className="space-y-2">
-                <Label>Elements</Label>
-                <div className="max-h-[440px] space-y-2 overflow-y-auto pr-1">
+      <Tabs defaultValue="compose" className="space-y-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <TabsList>
+            <TabsTrigger value="compose">Compose</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+          </TabsList>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={prepareExtensionPayload}>
+              <Plug className="mr-2 h-4 w-4" />
+              Extension
+            </Button>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button type="button" variant="outline">Advanced</Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Advanced</DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <Card className="border-border bg-card">
+                    <CardHeader className="flex flex-row items-center justify-between gap-3">
+                      <CardTitle className="text-base">JSON</CardTitle>
+                      <Button type="button" variant="outline" size="sm" onClick={copyJson}>
+                        <Clipboard className="mr-2 h-4 w-4" />
+                        Copy
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
+                        <div className="space-y-2">
+                          <Label htmlFor="extension-scheduler-token">Import token</Label>
+                          <Input
+                            id="extension-scheduler-token"
+                            type="password"
+                            value={extensionSchedulerToken}
+                            onChange={(event) => setExtensionSchedulerToken(event.target.value)}
+                            placeholder="EXTENSION_IMPORT_TOKEN"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select
+                            value={extensionSchedulerStatus}
+                            onValueChange={(value) => setExtensionSchedulerStatus(value as PostStatus)}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allowedExtensionStatuses.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <Textarea value={generatedJson} readOnly className="h-[360px] resize-none overflow-y-auto font-mono text-xs" />
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-border bg-card">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle className="text-base">Import</CardTitle>
+                      <Button type="button" variant="outline" size="sm" onClick={handleImportJson}>
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Load
+                      </Button>
+                    </CardHeader>
+                    <CardContent>
+                      <Textarea
+                        value={jsonInput}
+                        onChange={(event) => setJsonInput(event.target.value)}
+                        className="h-[478px] resize-none overflow-y-auto font-mono text-xs"
+                        placeholder='[{"title":"","description":"","image":""}]'
+                      />
+                    </CardContent>
+                  </Card>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        <TabsContent value="compose">
+          <Card className="mb-4 border-border bg-card">
+            <CardHeader className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <CardTitle className="text-base">Add from Scheduled Posts</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {selectedSourcePosts.length} selected · {sourceCandidates.length} available
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={toggleAllSourcePosts}
+                  disabled={sourceCandidates.length === 0}
+                >
+                  {selectedSourcePosts.length === sourceCandidates.length && sourceCandidates.length > 0
+                    ? 'Clear'
+                    : 'Select All'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={createElementsFromPosts}
+                  disabled={selectedSourcePosts.length === 0}
+                >
+                  <Wand2 className="mr-2 h-4 w-4" />
+                  Create Elements
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <div className="space-y-2">
+                  <Label>Page</Label>
+                  <Select
+                    value={sourcePageId}
+                    onValueChange={(value) => {
+                      setSourcePageId(value)
+                      setSelectedPostIds([])
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="All pages" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All pages</SelectItem>
+                      {pages.map((page) => (
+                        <SelectItem key={page.id} value={page.id}>
+                          {page.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {!sourceShowAll && (
+                  <div className="space-y-2">
+                    <Label htmlFor="compose-source-date">Date</Label>
+                    <Input
+                      id="compose-source-date"
+                      type="date"
+                      value={sourceDate}
+                      onChange={(event) => {
+                        setSourceDate(event.target.value)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Select
+                    value={sourceStatus}
+                    onValueChange={(value) => {
+                      setSourceStatus(value as PostStatus | 'all')
+                      setSelectedPostIds([])
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Post status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {postStatusOptions.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status === 'all'
+                            ? 'All statuses'
+                            : status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {!sourceShowAll && (
+                  <div className="space-y-2">
+                    <Label htmlFor="compose-source-start-time">Start time</Label>
+                    <Input
+                      id="compose-source-start-time"
+                      type="time"
+                      value={sourceStartTime}
+                      onChange={(event) => {
+                        setSourceStartTime(event.target.value)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-end">
+                  <label className="flex h-10 w-full items-center justify-between gap-3 rounded-md border border-border px-3">
+                    <span className="text-sm font-medium">Show all</span>
+                    <Switch
+                      checked={sourceShowAll}
+                      onCheckedChange={(checked) => {
+                        setSourceShowAll(checked)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid max-h-[240px] gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {sourceCandidates.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                    No posts with images found for this date and time.
+                  </div>
+                ) : (
+                  sourceCandidates.map((post) => (
+                    <label
+                      key={post.id}
+                      className="group flex cursor-pointer gap-2 rounded-md border border-border bg-background p-2 transition-colors hover:bg-accent/40"
+                    >
+                      {(post.imageUrl || post.imagePath) && (
+                        <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded bg-secondary">
+                          <img
+                            src={post.imageUrl ?? post.imagePath}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute left-1 top-1">
+                            <Checkbox
+                              checked={selectedPostIds.includes(post.id)}
+                              onCheckedChange={() => toggleSourcePost(post.id)}
+                              className="border-background bg-background/90 shadow"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex min-w-0 items-center gap-1.5 text-xs">
+                          <span className="truncate font-medium text-foreground">{getPageName(post.pageId)}</span>
+                          <span className="shrink-0 font-mono text-primary">{post.timeSlot}</span>
+                        </div>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {post.caption || 'No caption yet'}
+                        </p>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+            <Card className="border-border bg-card">
+              <CardHeader className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base">Elements</CardTitle>
+                  <Button type="button" size="sm" onClick={addElement}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
                   {drafts.map((draft, index) => {
                     const warningCount = draftWarningCounts[index] ?? 0
                     const shouldShake = validationPulse > 0 && warningCount > 0
@@ -850,173 +1087,208 @@ export function ArticleComposer() {
                   <Trash2 className="mr-2 h-4 w-4" />
                   Remove
                 </Button>
-              </div>
+              </CardContent>
+            </Card>
 
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-end gap-3 rounded-md border border-border px-3 py-2">
-                  <div className="flex items-center gap-2 py-2">
-                    <Switch
-                      id="composer-title-prefix-enabled"
-                      checked={titlePrefixEnabled}
-                      onCheckedChange={setTitlePrefixEnabled}
-                    />
-                    <Label htmlFor="composer-title-prefix-enabled" className="text-sm">
-                      Title prefix
-                    </Label>
+            <Card className="border-border bg-card">
+              <CardHeader className="space-y-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle className="text-lg">Editor</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Element {activeIndex + 1} of {drafts.length} · {wordCount} words
+                    </p>
                   </div>
-                  <div className="min-w-28 flex-1 space-y-1">
-                    <Label htmlFor="composer-title-prefix" className="text-xs text-muted-foreground">
-                      Prefix
-                    </Label>
-                    <Input
-                      id="composer-title-prefix"
-                      value={titlePrefix}
-                      onChange={(event) => setTitlePrefix(event.target.value)}
-                      onBlur={(event) => setTitlePrefix(event.target.value.trim() || 'VT')}
-                      disabled={!titlePrefixEnabled}
-                      className="h-8"
-                    />
-                  </div>
-                </div>
-
-                {activeDraftWarnings.length > 0 ? (
-                  <div
-                    key={validationPulse > 0 ? validationPulse : 'warning-panel'}
-                    className={`rounded-md border p-3 text-sm ${
-                      validationPulse > 0
-                        ? 'border-red-500 bg-red-500/10 shadow-sm shadow-red-500/20'
-                        : 'border-amber-500/30 bg-amber-500/10'
-                    }`}
-                    style={validationPulse > 0 ? { animation: 'composer-shake 260ms ease-in-out' } : undefined}
-                  >
-                    <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200">
-                      <AlertTriangle className="h-4 w-4" />
-                      Important fields are missing
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {activeDraftWarnings.map((warning) => (
-                        <span
-                          key={warning}
-                          className="rounded-full border border-amber-500/30 bg-background/70 px-2.5 py-1 text-xs text-amber-800 dark:text-amber-200"
-                        >
-                          {warning}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="space-y-2">
-                  <Label htmlFor="composer-title">Title</Label>
-                  <Input
-                    id="composer-title"
-                    value={activeDraft.title}
-                    onChange={(event) => updateActiveDraft({ title: event.target.value })}
-                    onBlur={normalizeActiveTitle}
-                    placeholder="Article title"
-                    className={isMissingTitle ? 'border-red-500 ring-1 ring-red-500' : undefined}
-                  />
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="composer-image">Thumbnail image URL</Label>
-                    <Input
-                      id="composer-image"
-                      value={activeDraft.image}
-                      onChange={(event) => updateActiveDraft({ image: event.target.value })}
-                      placeholder="https://..."
-                      className={isMissingThumbnail ? 'border-red-500 ring-1 ring-red-500' : undefined}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="composer-description-image">Article image URL</Label>
-                    <Input
-                      id="composer-description-image"
-                      value={activeDraft.descriptionImage}
-                      onChange={(event) => updateActiveDraft({ descriptionImage: event.target.value })}
-                      placeholder="https://..."
-                    />
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<h2>Heading</h2>')}>
+                      <Heading2 className="mr-2 h-4 w-4" />
+                      H2
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<p>Paragraph...</p>')}>
+                      <Pilcrow className="mr-2 h-4 w-4" />
+                      P
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<p><strong>Bold text</strong></p>')}>
+                      <Bold className="mr-2 h-4 w-4" />
+                      Bold
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => insertHtml('<ul><li>Item</li></ul>')}>
+                      <List className="mr-2 h-4 w-4" />
+                      List
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={resetComposer}>
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Reset
+                    </Button>
                   </div>
                 </div>
-
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                  <div className="space-y-2">
-                    <Label>Caption target post</Label>
-                    <Select
-                      value={activeDraft.sourcePostId || 'none'}
-                      onValueChange={(value) => {
-                        const post = posts.find((item) => item.id === value)
-                        updateActiveDraft({
-                          sourcePostId: value === 'none' ? '' : value,
-                          postCaption: value === 'none' ? '' : post?.caption ?? '',
-                        })
-                      }}
-                    >
-                      <SelectTrigger className={`w-full ${isMissingTargetPost ? 'border-red-500 ring-1 ring-red-500' : ''}`}>
-                        <SelectValue placeholder="Select post" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No post</SelectItem>
-                        {captionTargetPosts.map((post) => (
-                          <SelectItem key={post.id} value={post.id}>
-                            {post.postDate} {post.timeSlot} - {getPageName(post.pageId)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {activeSourcePost ? (
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <StatusBadge status={activeSourcePost.status} size="sm" />
-                        <span>{activeSourcePost.adsLink ? 'Has ads link' : 'No ads link'}</span>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="space-y-4">
+                    {activeDraftWarnings.length > 0 ? (
+                      <div
+                        key={validationPulse > 0 ? validationPulse : 'warning-panel'}
+                        className={`rounded-md border p-3 text-sm ${
+                          validationPulse > 0
+                            ? 'border-red-500 bg-red-500/10 shadow-sm shadow-red-500/20'
+                            : 'border-amber-500/30 bg-amber-500/10'
+                        }`}
+                        style={validationPulse > 0 ? { animation: 'composer-shake 260ms ease-in-out' } : undefined}
+                      >
+                        <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200">
+                          <AlertTriangle className="h-4 w-4" />
+                          Important fields are missing
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {activeDraftWarnings.map((warning) => (
+                            <span
+                              key={warning}
+                              className="rounded-full border border-amber-500/30 bg-background/70 px-2.5 py-1 text-xs text-amber-800 dark:text-amber-200"
+                            >
+                              {warning}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
-                  </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <Label htmlFor="composer-post-caption">Post caption</Label>
-                      <span className="text-xs text-muted-foreground">
-                        {activeDraft.postCaption.trim().length} chars
-                      </span>
+                    <div className="space-y-2">
+                      <Label htmlFor="composer-title">Title</Label>
+                      <Input
+                        id="composer-title"
+                        value={activeDraft.title}
+                        onChange={(event) => updateActiveDraft({ title: event.target.value })}
+                        onBlur={normalizeActiveTitle}
+                        placeholder="Article title"
+                        className={isMissingTitle ? 'border-red-500 ring-1 ring-red-500' : undefined}
+                      />
                     </div>
-                    <Textarea
-                      id="composer-post-caption"
-                      value={activeDraft.postCaption}
-                      onChange={(event) => updateActiveDraft({ postCaption: event.target.value })}
-                      className={`h-24 resize-none overflow-y-auto ${
-                        isMissingPostCaption ? 'border-red-500 ring-1 ring-red-500' : ''
-                      }`}
-                      placeholder="Caption to save into the selected Scheduler post..."
-                      disabled={!activeDraft.sourcePostId}
-                    />
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label>Description editor</Label>
+                        <span className="text-xs text-muted-foreground">{wordCount} words</span>
+                      </div>
+                      <div className={isMissingDescription ? 'rounded-md border border-red-500 ring-1 ring-red-500' : undefined}>
+                        <TinyMceHtmlEditor
+                          value={activeDraft.description}
+                          onChange={(description) => updateActiveDraft({ description })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-md border border-border p-3">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <Label htmlFor="composer-title-prefix-enabled" className="text-sm">
+                          Title prefix
+                        </Label>
+                        <Switch
+                          id="composer-title-prefix-enabled"
+                          checked={titlePrefixEnabled}
+                          onCheckedChange={setTitlePrefixEnabled}
+                        />
+                      </div>
+                      <Input
+                        id="composer-title-prefix"
+                        value={titlePrefix}
+                        onChange={(event) => setTitlePrefix(event.target.value)}
+                        onBlur={(event) => setTitlePrefix(event.target.value.trim() || 'VT')}
+                        disabled={!titlePrefixEnabled}
+                        className="h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="composer-image">Thumbnail image URL</Label>
+                      <Input
+                        id="composer-image"
+                        value={activeDraft.image}
+                        onChange={(event) => updateActiveDraft({ image: event.target.value })}
+                        placeholder="https://..."
+                        className={isMissingThumbnail ? 'border-red-500 ring-1 ring-red-500' : undefined}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="composer-description-image">Article image URL</Label>
+                      <Input
+                        id="composer-description-image"
+                        value={activeDraft.descriptionImage}
+                        onChange={(event) => updateActiveDraft({ descriptionImage: event.target.value })}
+                        placeholder="https://..."
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Caption target post</Label>
+                      <Select
+                        value={activeDraft.sourcePostId || 'none'}
+                        onValueChange={(value) => {
+                          const post = posts.find((item) => item.id === value)
+                          updateActiveDraft({
+                            sourcePostId: value === 'none' ? '' : value,
+                            postCaption: value === 'none' ? '' : post?.caption ?? '',
+                          })
+                        }}
+                      >
+                        <SelectTrigger className={`w-full ${isMissingTargetPost ? 'border-red-500 ring-1 ring-red-500' : ''}`}>
+                          <SelectValue placeholder="Select post" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No post</SelectItem>
+                          {captionTargetPosts.map((post) => (
+                            <SelectItem key={post.id} value={post.id}>
+                              {post.postDate} {post.timeSlot} - {getPageName(post.pageId)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {activeSourcePost ? (
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <StatusBadge status={activeSourcePost.status} size="sm" />
+                          <span>{activeSourcePost.adsLink ? 'Has ads link' : 'No ads link'}</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="composer-post-caption">Post caption</Label>
+                        <span className="text-xs text-muted-foreground">
+                          {activeDraft.postCaption.trim().length} chars
+                        </span>
+                      </div>
+                      <Textarea
+                        id="composer-post-caption"
+                        value={activeDraft.postCaption}
+                        onChange={(event) => updateActiveDraft({ postCaption: event.target.value })}
+                        className={`h-44 resize-none overflow-y-auto ${
+                          isMissingPostCaption ? 'border-red-500 ring-1 ring-red-500' : ''
+                        }`}
+                        placeholder="Caption to save into the selected Scheduler post..."
+                        disabled={!activeDraft.sourcePostId}
+                      />
+                    </div>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label>Description editor</Label>
-                    <span className="text-xs text-muted-foreground">{wordCount} words</span>
-                  </div>
-                  <div className={isMissingDescription ? 'rounded-md border border-red-500 ring-1 ring-red-500' : undefined}>
-                    <TinyMceHtmlEditor
-                      value={activeDraft.description}
-                      onChange={(description) => updateActiveDraft({ description })}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-6">
+        <TabsContent value="sources">
           <Card className="border-border bg-card">
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle className="text-lg">From Scheduled Posts</CardTitle>
+              <div>
+                <CardTitle className="text-lg">From Scheduled Posts</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {selectedSourcePosts.length} selected · {sourceCandidates.length} available
+                </p>
+              </div>
               <Button
                 type="button"
-                size="sm"
                 onClick={createElementsFromPosts}
                 disabled={selectedSourcePosts.length === 0}
               >
@@ -1025,7 +1297,7 @@ export function ArticleComposer() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                 <div className="space-y-2">
                   <Label>Page</Label>
                   <Select
@@ -1131,7 +1403,7 @@ export function ArticleComposer() {
                 </div>
               </div>
 
-              <div className="max-h-[280px] space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
                 {sourceCandidates.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
                     No posts with images found for this date and time.
@@ -1173,119 +1445,54 @@ export function ArticleComposer() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
 
+        <TabsContent value="preview">
           <Card className="border-border bg-card">
-            <CardHeader className="flex flex-row items-center justify-between gap-3">
-              <CardTitle className="text-lg">JSON</CardTitle>
-              <div className="flex gap-2">
-                <Button type="button" size="sm" onClick={prepareExtensionPayload}>
-                  <Plug className="mr-2 h-4 w-4" />
-                  Extension
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={copyJson}>
-                  <Clipboard className="mr-2 h-4 w-4" />
-                  Copy
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
-                <div className="space-y-2">
-                  <Label htmlFor="extension-scheduler-token">Import token</Label>
-                  <Input
-                    id="extension-scheduler-token"
-                    type="password"
-                    value={extensionSchedulerToken}
-                    onChange={(event) => setExtensionSchedulerToken(event.target.value)}
-                    placeholder="EXTENSION_IMPORT_TOKEN"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Status</Label>
-                  <Select
-                    value={extensionSchedulerStatus}
-                    onValueChange={(value) => setExtensionSchedulerStatus(value as PostStatus)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allowedExtensionStatuses.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Textarea value={generatedJson} readOnly className="h-[320px] resize-none overflow-y-auto font-mono text-xs" />
-            </CardContent>
-          </Card>
-
-          <Card className="border-border bg-card">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">Import</CardTitle>
-              <Button type="button" variant="outline" size="sm" onClick={handleImportJson}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Load
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Eye className="h-5 w-5" />
+                Preview
+              </CardTitle>
+              <Button type="button" variant="outline" size="sm" onClick={copyDescription}>
+                <Clipboard className="mr-2 h-4 w-4" />
+                Copy Active HTML
               </Button>
             </CardHeader>
             <CardContent>
-              <Textarea
-                value={jsonInput}
-                onChange={(event) => setJsonInput(event.target.value)}
-                className="h-40 resize-none overflow-y-auto font-mono text-xs"
-                placeholder='[{"title":"","description":"","image":""}]'
-              />
+              <div className="max-h-[760px] space-y-6 overflow-y-auto pr-2">
+                {drafts.map((draft, index) => (
+                  <div key={index} className="grid gap-6 border-b border-border pb-6 last:border-0 last:pb-0 lg:grid-cols-[220px_1fr]">
+                    <div className="overflow-hidden rounded-lg border border-border bg-secondary">
+                      {draft.image ? (
+                        <img src={draft.image} alt="" className="aspect-[4/5] w-full object-cover" />
+                      ) : (
+                        <div className="flex aspect-[4/5] items-center justify-center">
+                          <ImageIcon className="h-10 w-10 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    <article className="min-w-0 space-y-4">
+                      <div>
+                        <p className="text-xs font-medium uppercase text-muted-foreground">Element {index + 1}</p>
+                        <h2 className="text-2xl font-semibold leading-tight text-foreground">
+                          {draft.title
+                            ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
+                            : 'Untitled article'}
+                        </h2>
+                      </div>
+                      <div
+                        className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground"
+                        dangerouslySetInnerHTML={{ __html: draft.description || '<p>No content yet.</p>' }}
+                      />
+                    </article>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
-
-      <Card className="border-border bg-card">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Eye className="h-5 w-5" />
-            Preview
-          </CardTitle>
-          <Button type="button" variant="outline" size="sm" onClick={copyDescription}>
-            <Clipboard className="mr-2 h-4 w-4" />
-            Copy Active HTML
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="max-h-[680px] space-y-6 overflow-y-auto pr-2">
-            {drafts.map((draft, index) => (
-              <div key={index} className="grid gap-6 border-b border-border pb-6 last:border-0 last:pb-0 lg:grid-cols-[220px_1fr]">
-                <div className="overflow-hidden rounded-lg border border-border bg-secondary">
-                  {draft.image ? (
-                    <img src={draft.image} alt="" className="aspect-[4/5] w-full object-cover" />
-                  ) : (
-                    <div className="flex aspect-[4/5] items-center justify-center">
-                      <ImageIcon className="h-10 w-10 text-muted-foreground" />
-                    </div>
-                  )}
-                </div>
-                <article className="min-w-0 space-y-4">
-                  <div>
-                    <p className="text-xs font-medium uppercase text-muted-foreground">Element {index + 1}</p>
-                    <h2 className="text-2xl font-semibold leading-tight text-foreground">
-                      {draft.title
-                        ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
-                        : 'Untitled article'}
-                    </h2>
-                  </div>
-                  <div
-                    className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground"
-                    dangerouslySetInnerHTML={{ __html: draft.description || '<p>No content yet.</p>' }}
-                  />
-                </article>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
