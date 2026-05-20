@@ -162,6 +162,8 @@ const composerStateDbName = 'postops-composer'
 const composerStateStoreName = 'state'
 const extensionStartMessageType = 'POSTOPS_START_DAILY_FEJI'
 const extensionAckMessageType = 'POSTOPS_DAILY_FEJI_ACK'
+const extensionPingMessageType = 'POSTOPS_DAILY_FEJI_PING'
+const extensionPongMessageType = 'POSTOPS_DAILY_FEJI_PONG'
 const postStatusOptions: Array<PostStatus | 'all'> = [
   'all',
   'draft',
@@ -561,11 +563,39 @@ export function ArticleComposer() {
       })
     )
 
+    const bridgeDetected = await new Promise<boolean>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', handlePong)
+        resolve(false)
+      }, 800)
+
+      function handlePong(event: MessageEvent) {
+        if (event.source !== window || event.data?.type !== extensionPongMessageType) return
+        window.clearTimeout(timeout)
+        window.removeEventListener('message', handlePong)
+        resolve(true)
+      }
+
+      window.addEventListener('message', handlePong)
+      window.postMessage({ type: extensionPingMessageType }, window.location.origin)
+    })
+
+    if (!bridgeDetected) {
+      await navigator.clipboard.writeText(generatedJson)
+      toast({
+        title: 'Extension bridge not injected',
+        description:
+          'JSON copied instead. Reload Daily Feji extension in chrome://extensions, then reload this Composer tab.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     const extensionAck = await new Promise<{ ok: boolean; error: string }>((resolve) => {
       const timeout = window.setTimeout(() => {
         window.removeEventListener('message', handleAck)
         resolve({ ok: false, error: '' })
-      }, 1200)
+      }, 3000)
 
       function handleAck(event: MessageEvent) {
         if (event.source !== window || event.data?.type !== extensionAckMessageType) return
@@ -611,7 +641,7 @@ export function ArticleComposer() {
       title: extensionAck.error ? 'Extension error' : 'Extension not detected',
       description: extensionAck.error
         ? `${extensionAck.error}. JSON copied instead.`
-        : 'JSON copied instead. Reload the Chrome extension, then try again.',
+        : 'JSON copied instead. Bridge is injected, but extension background did not acknowledge the batch.',
       variant: 'destructive',
     })
   }
