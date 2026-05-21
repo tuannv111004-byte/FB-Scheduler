@@ -786,7 +786,38 @@ export function ArticleComposer() {
             <TabsTrigger value="compose">Compose</TabsTrigger>
             <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="w-56 space-y-1">
+              <Label htmlFor="composer-extension-token" className="text-xs text-muted-foreground">
+                Import token
+              </Label>
+              <Input
+                id="composer-extension-token"
+                type="password"
+                value={extensionSchedulerToken}
+                onChange={(event) => setExtensionSchedulerToken(event.target.value)}
+                placeholder="EXTENSION_IMPORT_TOKEN"
+                className="h-9"
+              />
+            </div>
+            <div className="w-36 space-y-1">
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <Select
+                value={extensionSchedulerStatus}
+                onValueChange={(value) => setExtensionSchedulerStatus(value as PostStatus)}
+              >
+                <SelectTrigger className="h-9 w-full">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allowedExtensionStatuses.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Button type="button" onClick={prepareExtensionPayload}>
               <Plug className="mr-2 h-4 w-4" />
               Extension
@@ -808,37 +839,7 @@ export function ArticleComposer() {
                         Copy
                       </Button>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]">
-                        <div className="space-y-2">
-                          <Label htmlFor="extension-scheduler-token">Import token</Label>
-                          <Input
-                            id="extension-scheduler-token"
-                            type="password"
-                            value={extensionSchedulerToken}
-                            onChange={(event) => setExtensionSchedulerToken(event.target.value)}
-                            placeholder="EXTENSION_IMPORT_TOKEN"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Status</Label>
-                          <Select
-                            value={extensionSchedulerStatus}
-                            onValueChange={(value) => setExtensionSchedulerStatus(value as PostStatus)}
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {allowedExtensionStatuses.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
+                    <CardContent>
                       <Textarea value={generatedJson} readOnly className="h-[360px] resize-none overflow-y-auto font-mono text-xs" />
                     </CardContent>
                   </Card>

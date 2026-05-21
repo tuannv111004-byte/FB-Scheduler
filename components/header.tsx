@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from 'react'
-import { Bell, Search, AlertTriangle, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { Bell, Search, AlertTriangle, PanelLeftOpen, PanelLeftClose, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/lib/store'
@@ -28,6 +28,11 @@ export function Header({ title, subtitle }: HeaderProps) {
       criticalCount: unread.filter((n) => n.type === 'error' || n.type === 'warning').length
     }
   }, [notifications])
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    window.location.assign('/login')
+  }
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 px-4 md:px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -84,6 +89,17 @@ export function Header({ title, subtitle }: HeaderProps) {
         )}
 
         <ThemeToggle compact />
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={logout}
+          title="Logout"
+          aria-label="Logout"
+        >
+          <LogOut className="h-5 w-5" />
+        </Button>
 
         {/* Notifications */}
         <Link href="/notifications">
