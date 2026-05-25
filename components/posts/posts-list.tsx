@@ -63,6 +63,10 @@ const targetImageWidth = 1080
 const targetImageHeight = 1350
 const targetImageRatio = targetImageWidth / targetImageHeight
 const postsPreferencesStorageKey = 'postops:posts-preferences'
+const autoHighlightRefreshMs = 60 * 1000
+
+type HighlightMode = 'auto' | 'manual' | 'off'
+type TimeHighlightState = 'manual-upcoming' | 'manual-recent' | 'due' | 'upcoming' | 'recent' | 'next'
 
 type PostsPreferences = {
   selectedDate?: string
@@ -72,6 +76,7 @@ type PostsPreferences = {
   filterStatus?: string
   searchQuery?: string
   zoomImagesOnHover?: boolean
+  highlightMode?: HighlightMode
   highlightTargetTime?: string
   highlightTargetTimes?: string[]
   highlightWindowMinutes?: number
@@ -182,6 +187,22 @@ function addOneDay(dateValue: string) {
   return `${year}-${month}-${day}`
 }
 
+function formatDateValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function createScheduledDate(post: Post) {
+  const slotMinutes = parseTimeSlotMinutes(post.timeSlot)
+  if (slotMinutes === null) return null
+
+  const hours = Math.floor(slotMinutes / 60)
+  const minutes = slotMinutes % 60
+  return new Date(`${post.postDate}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`)
+}
+
 function getDisplayDateForTimeSlot(selectedDate: string, timeSlot: string) {
   return timeSlot === '04:00' ? addOneDay(selectedDate) : selectedDate
 }
@@ -249,6 +270,10 @@ export function PostsList() {
   const [zoomImagesOnHover, setZoomImagesOnHover] = useState(() => {
     return readPostsPreferences().zoomImagesOnHover === true
   })
+  const [highlightMode, setHighlightMode] = useState<HighlightMode>(() => {
+    const savedValue = readPostsPreferences().highlightMode
+    return savedValue === 'manual' || savedValue === 'off' ? savedValue : 'auto'
+  })
   const [highlightWindowMinutes, setHighlightWindowMinutes] = useState(() => {
     const savedValue = readPostsPreferences().highlightWindowMinutes
     return typeof savedValue === 'number' && Number.isFinite(savedValue)
@@ -274,6 +299,7 @@ export function PostsList() {
     left: number
   } | null>(null)
   const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null)
+  const [currentTime, setCurrentTime] = useState(() => new Date())
 
   const handleEdit = (post: Post) => {
     setHighlightedPostId(post.id)
@@ -399,8 +425,12 @@ export function PostsList() {
       ? filterTimeSlots[0]
       : `${filterTimeSlots.length} Slots`
   const highlightTimeLabel =
-    highlightTargetTimes.length === 0
-      ? 'No Highlight'
+    highlightMode === 'auto'
+      ? 'Auto'
+      : highlightMode === 'off'
+      ? 'Off'
+      : highlightTargetTimes.length === 0
+      ? 'Manual'
       : highlightTargetTimes.length === 1
       ? highlightTargetTimes[0]
       : `${highlightTargetTimes.length} Highlights`
@@ -434,10 +464,12 @@ export function PostsList() {
   }
 
   const clearHighlightTimes = () => {
+    setHighlightMode('off')
     setHighlightTargetTimes([])
   }
 
   const toggleHighlightTime = (timeSlot: string) => {
+    setHighlightMode('manual')
     setHighlightTargetTimes((current) => {
       if (current.includes(timeSlot)) {
         return current.filter((slot) => slot !== timeSlot)
@@ -485,9 +517,69 @@ export function PostsList() {
 
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
-  const getTimeHighlightState = (post: Post) => {
-    if (highlightWindowMinutes <= 0) {
-      return null
+  const autoHighlightedPostIds = useMemo(() => {
+    const highlighted = new Map<string, TimeHighlightState>()
+    if (highlightMode !== 'auto' || highlightWindowMinutes <= 0) return highlighted
+
+    const today = formatDateValue(currentTime)
+    const scheduledPosts = filteredPosts
+      .map((post) => ({
+        post,
+        scheduledAt: createScheduledDate(post),
+      }))
+      .filter((item): item is { post: Post; scheduledAt: Date } => item.scheduledAt !== null)
+      .sort((first, second) => first.scheduledAt.getTime() - second.scheduledAt.getTime())
+
+    if (scheduledPosts.length === 0) return highlighted
+
+    if (selectedDate !== today) {
+      const firstActionablePost =
+        scheduledPosts.find((item) => item.post.status !== 'posted' && item.post.status !== 'skipped') ??
+        scheduledPosts[0]
+      scheduledPosts
+        .filter((item) => item.scheduledAt.getTime() === firstActionablePost.scheduledAt.getTime())
+        .forEach((item) => highlighted.set(item.post.id, 'next'))
+      return highlighted
+    }
+
+    const nowMs = currentTime.getTime()
+    const windowMs = highlightWindowMinutes * 60 * 1000
+    const inWindow = scheduledPosts.filter((item) => {
+      const diffMs = item.scheduledAt.getTime() - nowMs
+      return Math.abs(diffMs) <= windowMs
+    })
+
+    inWindow.forEach((item) => {
+      const diffMinutes = Math.round((item.scheduledAt.getTime() - nowMs) / 60000)
+      highlighted.set(
+        item.post.id,
+        Math.abs(diffMinutes) <= 5 ? 'due' : diffMinutes > 0 ? 'upcoming' : 'recent'
+      )
+    })
+
+    if (highlighted.size === 0) {
+      const nearestPost = scheduledPosts
+        .map((item) => ({
+          ...item,
+          distanceMs: Math.abs(item.scheduledAt.getTime() - nowMs),
+        }))
+        .sort((first, second) => first.distanceMs - second.distanceMs)[0]
+
+      if (nearestPost) {
+        scheduledPosts
+          .filter((item) => item.scheduledAt.getTime() === nearestPost.scheduledAt.getTime())
+          .forEach((item) => highlighted.set(item.post.id, 'next'))
+      }
+    }
+
+    return highlighted
+  }, [currentTime, filteredPosts, highlightMode, highlightWindowMinutes, selectedDate])
+
+  const getTimeHighlightState = (post: Post): TimeHighlightState | null => {
+    if (highlightMode === 'off' || highlightWindowMinutes <= 0) return null
+
+    if (highlightMode === 'auto') {
+      return autoHighlightedPostIds.get(post.id) ?? null
     }
 
     const slotMinutes = parseTimeSlotMinutes(post.timeSlot)
@@ -507,7 +599,7 @@ export function PostsList() {
     }
 
     const diffMinutes = matchingDiffs.sort((first, second) => Math.abs(first) - Math.abs(second))[0]
-    return diffMinutes >= 0 ? 'upcoming' : 'current'
+    return diffMinutes >= 0 ? 'manual-upcoming' : 'manual-recent'
   }
 
   useEffect(() => {
@@ -523,6 +615,16 @@ export function PostsList() {
   }, [highlightTimeOptions])
 
   useEffect(() => {
+    if (highlightMode !== 'auto') return
+
+    const intervalId = window.setInterval(() => {
+      setCurrentTime(new Date())
+    }, autoHighlightRefreshMs)
+
+    return () => window.clearInterval(intervalId)
+  }, [highlightMode])
+
+  useEffect(() => {
     window.localStorage.setItem(
       postsPreferencesStorageKey,
         JSON.stringify({
@@ -533,6 +635,7 @@ export function PostsList() {
           filterStatus,
           searchQuery,
           zoomImagesOnHover,
+          highlightMode,
           highlightTargetTimes,
           highlightWindowMinutes,
         } satisfies PostsPreferences)
@@ -541,12 +644,61 @@ export function PostsList() {
     filterPageIds,
     filterStatus,
     filterTimeSlots,
+    highlightMode,
     highlightTargetTimes,
     highlightWindowMinutes,
     searchQuery,
     selectedDate,
     zoomImagesOnHover,
   ])
+
+  const getHighlightRowClass = (state: TimeHighlightState | null) => {
+    if (!state) return 'hover:bg-accent/20'
+
+    if (state === 'due') {
+      return 'bg-red-500/10 shadow-[inset_3px_0_0_rgb(239_68_68)] hover:bg-red-500/15'
+    }
+
+    if (state === 'recent') {
+      return 'bg-orange-500/10 shadow-[inset_3px_0_0_rgb(249_115_22)] hover:bg-orange-500/15'
+    }
+
+    if (state === 'next') {
+      return 'bg-sky-500/10 shadow-[inset_3px_0_0_rgb(14_165_233)] hover:bg-sky-500/15'
+    }
+
+    return 'bg-amber-500/10 shadow-[inset_3px_0_0_rgb(245_158_11)] hover:bg-amber-500/15'
+  }
+
+  const getHighlightBadgeClass = (state: TimeHighlightState | null) => {
+    if (state === 'due') {
+      return 'border-red-400/50 bg-red-400/15 font-mono text-red-300 shadow-[inset_0_0_0_1px_rgb(248_113_113_/_0.16)]'
+    }
+
+    if (state === 'recent') {
+      return 'border-orange-400/50 bg-orange-400/15 font-mono text-orange-300 shadow-[inset_0_0_0_1px_rgb(251_146_60_/_0.16)]'
+    }
+
+    if (state === 'next') {
+      return 'border-sky-400/50 bg-sky-400/15 font-mono text-sky-300 shadow-[inset_0_0_0_1px_rgb(56_189_248_/_0.16)]'
+    }
+
+    if (state) {
+      return 'border-amber-400/50 bg-amber-400/15 font-mono text-amber-300 shadow-[inset_0_0_0_1px_rgb(251_191_36_/_0.16)]'
+    }
+
+    return 'border-primary/30 bg-primary/10 font-mono text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.08)]'
+  }
+
+  const getHighlightTitle = (state: TimeHighlightState | null) => {
+    if (state === 'due') return 'Due now'
+    if (state === 'upcoming') return 'Upcoming within highlight window'
+    if (state === 'recent') return 'Recently passed within highlight window'
+    if (state === 'next') return 'Next actionable time slot'
+    if (state === 'manual-upcoming') return 'Manual highlighted upcoming slot'
+    if (state === 'manual-recent') return 'Manual highlighted recent slot'
+    return undefined
+  }
 
   return (
     <>
@@ -664,16 +816,22 @@ export function PostsList() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-80 w-44 overflow-y-auto border-border bg-popover">
                   <DropdownMenuCheckboxItem
-                    checked={highlightTargetTimes.length === 0}
+                    checked={highlightMode === 'auto'}
+                    onCheckedChange={() => setHighlightMode('auto')}
+                  >
+                    Auto
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={highlightMode === 'off'}
                     onCheckedChange={clearHighlightTimes}
                   >
-                    No Highlight
+                    Off
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuSeparator className="bg-border" />
                   {highlightTimeOptions.map((slot) => (
                     <DropdownMenuCheckboxItem
                       key={slot}
-                      checked={selectedHighlightTimeSet.has(slot)}
+                      checked={highlightMode === 'manual' && selectedHighlightTimeSet.has(slot)}
                       onCheckedChange={() => toggleHighlightTime(slot)}
                     >
                       {slot}
@@ -734,9 +892,7 @@ export function PostsList() {
                       className={`border-border transition-colors ${
                         highlightedPostId === post.id
                           ? 'bg-primary/8 shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-primary/12'
-                          : isTimeHighlighted
-                          ? 'bg-amber-500/10 shadow-[inset_3px_0_0_rgb(245_158_11)] hover:bg-amber-500/15'
-                          : 'hover:bg-accent/20'
+                          : getHighlightRowClass(timeHighlightState)
                       }`}
                     >
                       <TableCell>
@@ -800,18 +956,8 @@ export function PostsList() {
                       <TableCell>
                         <Badge
                           variant="outline"
-                          className={
-                            isTimeHighlighted
-                              ? 'border-amber-400/50 bg-amber-400/15 font-mono text-amber-300 shadow-[inset_0_0_0_1px_rgb(251_191_36_/_0.16)]'
-                              : 'border-primary/30 bg-primary/10 font-mono text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.08)]'
-                          }
-                          title={
-                            isTimeHighlighted
-                              ? timeHighlightState === 'upcoming'
-                                ? 'Upcoming highlighted time slot'
-                                : 'Current highlighted time slot'
-                              : undefined
-                          }
+                          className={getHighlightBadgeClass(timeHighlightState)}
+                          title={isTimeHighlighted ? getHighlightTitle(timeHighlightState) : undefined}
                         >
                           {post.timeSlot}
                           {post.timeSlot === '04:00' && post.postDate === addOneDay(selectedDate)

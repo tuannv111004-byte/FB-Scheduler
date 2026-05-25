@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ToastAction } from '@/components/ui/toast'
 import {
   Dialog,
   DialogContent,
@@ -206,6 +207,12 @@ type SavedComposerState = {
   selectedPostIds?: string[]
 }
 
+type ComposerUndoSnapshot = {
+  drafts: ArticleDraft[]
+  activeIndex: number
+  dismissedPostIds: string[]
+}
+
 function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
   if (typeof window === 'undefined') {
     return { enabled: true, prefix: 'VT' }
@@ -330,6 +337,21 @@ function buildJson(drafts: ArticleDraft[], titlePrefix: string, titlePrefixEnabl
   )
 }
 
+function buildExtensionItems(drafts: ArticleDraft[], titlePrefix: string, titlePrefixEnabled: boolean) {
+  return drafts
+    .filter((draft) => getDraftWarnings(draft).length === 0)
+    .map((draft) => ({
+      title: ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled),
+      description: draft.description.trim(),
+      image: draft.image.trim(),
+      schedulerPostId: draft.sourcePostId.trim(),
+      caption: draft.postCaption.trim(),
+      ...(draft.descriptionImage.trim()
+        ? { descriptionImage: draft.descriptionImage.trim() }
+        : {}),
+    }))
+}
+
 function normalizeImportedDraft(item: unknown): ArticleDraft {
   if (!item || typeof item !== 'object') {
     return createDraft()
@@ -346,13 +368,27 @@ function normalizeImportedDraft(item: unknown): ArticleDraft {
   })
 }
 
+function createDraftFromPost(post: Post) {
+  return createDraft({
+    image: post.imageUrl ?? post.imagePath ?? '',
+    sourcePostId: post.id,
+    postCaption: post.caption,
+  })
+}
+
+function hydrateDraftFromPost(draft: ArticleDraft, post: Post) {
+  return {
+    ...draft,
+    image: draft.image || post.imageUrl || post.imagePath || '',
+    postCaption: draft.postCaption || post.caption,
+  }
+}
+
 export function ArticleComposer() {
   const posts = useAppStore((state) => state.posts)
   const pages = useAppStore((state) => state.pages)
   const storeSelectedDate = useAppStore((state) => state.selectedDate)
-  const [drafts, setDrafts] = useState<ArticleDraft[]>(
-    () => [createDraft()]
-  )
+  const [drafts, setDrafts] = useState<ArticleDraft[]>(() => [])
   const [activeIndex, setActiveIndex] = useState(0)
   const [jsonInput, setJsonInput] = useState('')
   const [sourcePageId, setSourcePageId] = useState('all')
@@ -374,6 +410,9 @@ export function ArticleComposer() {
     () => readExtensionSchedulerConfig().status
   )
   const [validationPulse, setValidationPulse] = useState(0)
+  const [hasLoadedSavedComposerState, setHasLoadedSavedComposerState] = useState(false)
+  const [dismissedPostIds, setDismissedPostIds] = useState<string[]>([])
+  const [undoSnapshot, setUndoSnapshot] = useState<ComposerUndoSnapshot | null>(null)
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
   const activeDraftWarnings = useMemo(() => getDraftWarnings(activeDraft), [activeDraft])
@@ -410,7 +449,25 @@ export function ArticleComposer() {
       })
       .sort(comparePostsBySchedule)
   }, [posts, sourceDate, sourcePageId, sourceShowAll, sourceStartTime, sourceStatus])
+  const draftPostCandidates = useMemo(() => {
+    const startMinutes = parseTimeSlotMinutes(sourceStartTime) ?? 0
+    if (sourceStatus !== 'all' && sourceStatus !== 'draft') return [] as Post[]
 
+    return posts
+      .filter((post) => {
+        if (post.status !== 'draft') return false
+        if (dismissedPostIds.includes(post.id)) return false
+        if (!post.imageUrl && !post.imagePath) return false
+        if (!sourceShowAll && post.postDate !== sourceDate) return false
+        if (sourcePageId !== 'all' && post.pageId !== sourcePageId) return false
+
+        if (sourceShowAll) return true
+
+        const postMinutes = parseTimeSlotMinutes(post.timeSlot)
+        return postMinutes === null || postMinutes >= startMinutes
+      })
+      .sort(comparePostsBySchedule)
+  }, [dismissedPostIds, posts, sourceDate, sourcePageId, sourceShowAll, sourceStartTime, sourceStatus])
   const selectedSourcePosts = useMemo(
     () => sourceCandidates.filter((post) => selectedPostIds.includes(post.id)),
     [sourceCandidates, selectedPostIds]
@@ -426,6 +483,29 @@ export function ArticleComposer() {
 
     return [activeSourcePost, ...sourceCandidates].sort(comparePostsBySchedule)
   }, [activeSourcePost, sourceCandidates])
+  const filteredDraftEntries = useMemo(() => {
+    const startMinutes = parseTimeSlotMinutes(sourceStartTime) ?? 0
+
+    return drafts
+      .map((draft, index) => ({
+        draft,
+        index,
+        sourcePost: posts.find((post) => post.id === draft.sourcePostId),
+      }))
+      .filter(({ draft, sourcePost }) => {
+        if (!sourcePost) return true
+
+        if (!sourceShowAll && sourcePost.postDate !== sourceDate) return false
+        if (sourcePageId !== 'all' && sourcePost.pageId !== sourcePageId) return false
+        if (sourceStatus !== 'all' && sourcePost.status !== sourceStatus) return false
+
+        if (sourceShowAll) return true
+
+        const postMinutes = parseTimeSlotMinutes(sourcePost.timeSlot)
+        return postMinutes === null || postMinutes >= startMinutes
+      })
+  }, [drafts, posts, sourceDate, sourcePageId, sourceShowAll, sourceStartTime, sourceStatus])
+
   const getPageName = (pageId: string) => {
     return pages.find((page) => page.id === pageId)?.name ?? 'Unknown page'
   }
@@ -433,6 +513,23 @@ export function ArticleComposer() {
   const updateActiveDraft = (updates: Partial<ArticleDraft>) => {
     setDrafts((current) =>
       current.map((draft, index) => (index === activeIndex ? { ...draft, ...updates } : draft))
+    )
+  }
+
+  const selectElement = (index: number) => {
+    const draft = drafts[index]
+    const sourcePost = draft?.sourcePostId
+      ? posts.find((post) => post.id === draft.sourcePostId)
+      : undefined
+
+    setActiveIndex(index)
+
+    if (!draft || !sourcePost) return
+
+    setDrafts((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? hydrateDraftFromPost(item, sourcePost) : item
+      )
     )
   }
 
@@ -475,13 +572,7 @@ export function ArticleComposer() {
       return
     }
 
-    const newDrafts = selectedSourcePosts.map((post) =>
-      createDraft({
-        image: post.imageUrl ?? post.imagePath ?? '',
-        sourcePostId: post.id,
-        postCaption: post.caption,
-      })
-    )
+    const newDrafts = selectedSourcePosts.map(createDraftFromPost)
 
     setDrafts((current) => {
       const shouldReplaceBlank = current.length === 1 && isBlankDraft(current[0])
@@ -494,7 +585,7 @@ export function ArticleComposer() {
 
   const removeActiveElement = () => {
     if (drafts.length === 1) {
-      setDrafts([createDraft()])
+      setDrafts([])
       setActiveIndex(0)
       return
     }
@@ -506,7 +597,7 @@ export function ArticleComposer() {
   const resetComposer = () => {
     window.localStorage.removeItem(composerStateStorageKey)
     void deleteSavedComposerStateFromDb()
-    setDrafts([createDraft()])
+    setDrafts([])
     setActiveIndex(0)
     setJsonInput('')
     setSourcePageId('all')
@@ -515,7 +606,17 @@ export function ArticleComposer() {
     setSourceDate(storeSelectedDate)
     setSourceStartTime('00:00')
     setSelectedPostIds([])
+    setDismissedPostIds([])
+    setUndoSnapshot(null)
     toast({ title: 'Composer reset' })
+  }
+
+  const undoLastComposerReset = (snapshot: ComposerUndoSnapshot) => {
+    setDrafts(snapshot.drafts.map((draft) => createDraft(draft)))
+    setActiveIndex(Math.min(snapshot.activeIndex, Math.max(0, snapshot.drafts.length - 1)))
+    setDismissedPostIds(snapshot.dismissedPostIds)
+    setUndoSnapshot(null)
+    toast({ title: 'Composer restored' })
   }
 
   const insertHtml = (snippet: string) => {
@@ -530,18 +631,16 @@ export function ArticleComposer() {
   }
 
   const prepareExtensionPayload = async () => {
-    const invalidDraftIndexes = drafts
-      .map((draft, index) => (getDraftWarnings(draft).length > 0 ? index : -1))
-      .filter((index) => index >= 0)
+    const readyItems = buildExtensionItems(drafts, titlePrefix, titlePrefixEnabled)
+    const skippedCount = drafts.length - readyItems.length
 
-    if (invalidDraftIndexes.length > 0) {
+    if (readyItems.length === 0) {
+      const firstInvalidIndex = drafts.findIndex((draft) => getDraftWarnings(draft).length > 0)
       setValidationPulse(Date.now())
-      setActiveIndex(invalidDraftIndexes[0])
+      setActiveIndex(firstInvalidIndex >= 0 ? firstInvalidIndex : 0)
       toast({
-        title: 'Missing important fields',
-        description: `Fix ${invalidDraftIndexes.length} element${
-          invalidDraftIndexes.length > 1 ? 's' : ''
-        } before sending to the extension.`,
+        title: 'No ready elements',
+        description: 'Finish at least one element before sending to the extension.',
         variant: 'destructive',
       })
       return
@@ -562,12 +661,11 @@ export function ArticleComposer() {
       }
     }
 
-    const items = JSON.parse(generatedJson)
     window.localStorage.setItem(
       extensionPayloadStorageKey,
       JSON.stringify({
         createdAt: new Date().toISOString(),
-        items,
+        items: readyItems,
       })
     )
 
@@ -589,11 +687,11 @@ export function ArticleComposer() {
     })
 
     if (!bridgeDetected) {
-      await navigator.clipboard.writeText(generatedJson)
+      await navigator.clipboard.writeText(JSON.stringify(readyItems, null, 2))
       toast({
         title: 'Extension bridge not injected',
         description:
-          'JSON copied instead. Reload Daily Feji extension in chrome://extensions, then reload this Composer tab.',
+          `Ready JSON copied instead. ${skippedCount > 0 ? `${skippedCount} unfinished element${skippedCount > 1 ? 's' : ''} skipped. ` : ''}Reload Daily Feji extension in chrome://extensions, then reload this Composer tab.`,
         variant: 'destructive',
       })
       return
@@ -620,7 +718,7 @@ export function ArticleComposer() {
         {
           type: extensionStartMessageType,
           payload: {
-            items,
+            items: readyItems,
             options: {
               imagePlacement: 'none',
             },
@@ -637,19 +735,39 @@ export function ArticleComposer() {
     })
 
     if (extensionAck.ok) {
+      const sentPostIds = new Set(readyItems.map((item) => item.schedulerPostId))
+      const snapshot: ComposerUndoSnapshot = {
+        drafts,
+        activeIndex,
+        dismissedPostIds,
+      }
+      setUndoSnapshot(snapshot)
+      setDismissedPostIds((current) => Array.from(new Set([...current, ...sentPostIds])))
+      setDrafts((current) => {
+        const next = current.filter((draft) => !sentPostIds.has(draft.sourcePostId))
+        return next
+      })
+      setActiveIndex(0)
+      setSelectedPostIds([])
+
       toast({
         title: 'Extension started',
-        description: `${items.length} item${items.length > 1 ? 's' : ''} sent to Daily Feji extension.`,
+        description: `${readyItems.length} ready item${readyItems.length > 1 ? 's' : ''} sent and cleared.${skippedCount > 0 ? ` ${skippedCount} unfinished kept.` : ''}`,
+        action: (
+          <ToastAction altText="Undo composer clear" onClick={() => undoLastComposerReset(snapshot)}>
+            Undo
+          </ToastAction>
+        ),
       })
       return
     }
 
-    await navigator.clipboard.writeText(generatedJson)
+    await navigator.clipboard.writeText(JSON.stringify(readyItems, null, 2))
     toast({
       title: extensionAck.error ? 'Extension error' : 'Extension not detected',
       description: extensionAck.error
-        ? `${extensionAck.error}. JSON copied instead.`
-        : 'JSON copied instead. Bridge is injected, but extension background did not acknowledge the batch.',
+        ? `${extensionAck.error}. Ready JSON copied instead.`
+        : 'Ready JSON copied instead. Bridge is injected, but extension background did not acknowledge the batch.',
       variant: 'destructive',
     })
   }
@@ -699,7 +817,12 @@ export function ArticleComposer() {
     let isCancelled = false
     readSavedComposerStateFromDb()
       .then((savedState) => {
-        if (isCancelled || !savedState.drafts?.length) return
+        if (isCancelled) return
+
+        if (!savedState.drafts?.length) {
+          setHasLoadedSavedComposerState(true)
+          return
+        }
 
         setDrafts(savedState.drafts.map((draft) => createDraft(draft)))
         setActiveIndex(savedState.activeIndex ?? 0)
@@ -711,15 +834,38 @@ export function ArticleComposer() {
         setSourceStartTime(savedState.sourceStartTime ?? '00:00')
         setSelectedPostIds(savedState.selectedPostIds ?? [])
         window.localStorage.removeItem(composerStateStorageKey)
+        setHasLoadedSavedComposerState(true)
       })
       .catch(() => {
         // Autosave restore is best-effort.
+        if (!isCancelled) {
+          setHasLoadedSavedComposerState(true)
+        }
       })
 
     return () => {
       isCancelled = true
     }
   }, [storeSelectedDate])
+
+  useEffect(() => {
+    if (!hasLoadedSavedComposerState || draftPostCandidates.length === 0) return
+
+    setDrafts((current) => {
+      const currentPostIds = new Set(current.map((draft) => draft.sourcePostId).filter(Boolean))
+      const missingDrafts = draftPostCandidates
+        .filter((post) => !currentPostIds.has(post.id))
+        .map(createDraftFromPost)
+
+      if (missingDrafts.length === 0) return current
+
+      if (current.length === 1 && isBlankDraft(current[0])) {
+        return missingDrafts
+      }
+
+      return [...current, ...missingDrafts]
+    })
+  }, [draftPostCandidates, hasLoadedSavedComposerState])
 
   useEffect(() => {
     if (activeIndex > drafts.length - 1) {
@@ -868,7 +1014,7 @@ export function ArticleComposer() {
         </div>
 
         <TabsContent value="compose">
-          <Card className="mb-4 border-border bg-card">
+          <Card className="hidden">
             <CardHeader className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <CardTitle className="text-base">Add from Scheduled Posts</CardTitle>
@@ -1033,7 +1179,7 @@ export function ArticleComposer() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+          <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
             <Card className="border-border bg-card">
               <CardHeader className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
@@ -1045,19 +1191,119 @@ export function ArticleComposer() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className="space-y-3 rounded-md border border-border p-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Page</Label>
+                      <Select
+                        value={sourcePageId}
+                        onValueChange={(value) => {
+                          setSourcePageId(value)
+                          setSelectedPostIds([])
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="All pages" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All pages</SelectItem>
+                          {pages.map((page) => (
+                            <SelectItem key={page.id} value={page.id}>
+                              {page.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Status</Label>
+                      <Select
+                        value={sourceStatus}
+                        onValueChange={(value) => {
+                          setSourceStatus(value as PostStatus | 'all')
+                          setSelectedPostIds([])
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Post status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {postStatusOptions.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status === 'all'
+                                ? 'All statuses'
+                                : status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {!sourceShowAll && (
+                      <div className="space-y-2">
+                        <Label htmlFor="elements-source-date">Date</Label>
+                        <Input
+                          id="elements-source-date"
+                          type="date"
+                          value={sourceDate}
+                          onChange={(event) => {
+                            setSourceDate(event.target.value)
+                            setSelectedPostIds([])
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {!sourceShowAll && (
+                      <div className="space-y-2">
+                        <Label htmlFor="elements-source-start-time">Start time</Label>
+                        <Input
+                          id="elements-source-start-time"
+                          type="time"
+                          value={sourceStartTime}
+                          onChange={(event) => {
+                            setSourceStartTime(event.target.value)
+                            setSelectedPostIds([])
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <label className="flex h-10 w-full items-center justify-between gap-3 rounded-md border border-border px-3">
+                    <span className="text-sm font-medium">Show all</span>
+                    <Switch
+                      checked={sourceShowAll}
+                      onCheckedChange={(checked) => {
+                        setSourceShowAll(checked)
+                        setSelectedPostIds([])
+                      }}
+                    />
+                  </label>
+
+                </div>
+
                 <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
-                  {drafts.map((draft, index) => {
+                  {filteredDraftEntries.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                      No elements match this filter.
+                    </div>
+                  ) : filteredDraftEntries.map(({ draft, index, sourcePost }) => {
                     const warningCount = draftWarningCounts[index] ?? 0
                     const shouldShake = validationPulse > 0 && warningCount > 0
+                    const imageUrl = draft.image || sourcePost?.imageUrl || sourcePost?.imagePath || ''
+                    const pageName = sourcePost ? getPageName(sourcePost.pageId) : 'No target post'
+                    const dateLabel = sourcePost?.postDate ?? ''
+                    const timeLabel = sourcePost?.timeSlot ?? `Element ${index + 1}`
+                    const previewText = draft.postCaption || draft.title || 'No caption yet'
 
                     return (
                       <button
                         key={`${index}-${shouldShake ? validationPulse : 'idle'}`}
                         type="button"
-                        onClick={() => {
-                          setActiveIndex(index)
-                        }}
-                        className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                        onClick={() => selectElement(index)}
+                        className={`group flex w-full min-w-0 gap-2 rounded-md border bg-background p-2 text-left transition-colors ${
                           shouldShake
                             ? 'border-red-500 bg-red-500/10 text-red-700 shadow-sm shadow-red-500/20 dark:text-red-300'
                             : index === activeIndex
@@ -1066,19 +1312,37 @@ export function ArticleComposer() {
                       }`}
                         style={shouldShake ? { animation: 'composer-shake 260ms ease-in-out' } : undefined}
                       >
-                        <span className="flex items-center justify-between gap-2 font-medium">
-                          <span>Element {index + 1}</span>
-                          {warningCount > 0 ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                              <AlertTriangle className="h-3 w-3" />
-                              {warningCount}
+                        {imageUrl ? (
+                          <div className="relative h-14 w-16 shrink-0 overflow-hidden rounded bg-secondary">
+                            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded bg-secondary">
+                            <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex min-w-0 items-center justify-between gap-2 text-xs">
+                            <span className="truncate font-medium text-foreground">{pageName}</span>
+                            <span className="shrink-0 font-mono text-primary">{timeLabel}</span>
+                          </span>
+                          {dateLabel ? (
+                            <span className="block truncate text-[11px] text-muted-foreground">
+                              {dateLabel}
                             </span>
                           ) : null}
-                        </span>
-                        <span className="block truncate text-xs">
-                          {draft.title
-                            ? ensureTitlePrefix(draft.title, titlePrefix, titlePrefixEnabled)
-                            : 'Untitled'}
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {previewText}
+                          </span>
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {sourcePost ? <StatusBadge status={sourcePost.status} size="sm" /> : null}
+                            {warningCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                                <AlertTriangle className="h-3 w-3" />
+                                {warningCount}
+                              </span>
+                            ) : null}
+                          </span>
                         </span>
                       </button>
                     )
@@ -1171,7 +1435,13 @@ export function ArticleComposer() {
                         <Label>Description editor</Label>
                         <span className="text-xs text-muted-foreground">{wordCount} words</span>
                       </div>
-                      <div className={isMissingDescription ? 'rounded-md border border-red-500 ring-1 ring-red-500' : undefined}>
+                      <div
+                        className={
+                          isMissingDescription
+                            ? 'rounded-md border border-red-500 ring-1 ring-red-500'
+                            : undefined
+                        }
+                      >
                         <TinyMceHtmlEditor
                           value={activeDraft.description}
                           onChange={(description) => updateActiveDraft({ description })}
@@ -1181,6 +1451,41 @@ export function ArticleComposer() {
                   </div>
 
                   <div className="space-y-4">
+                    <div className="overflow-hidden rounded-md border border-border bg-background">
+                      {activeDraft.image ? (
+                        <img
+                          src={activeDraft.image}
+                          alt=""
+                          className="aspect-[4/5] w-full bg-secondary object-cover"
+                        />
+                      ) : (
+                        <div className="flex aspect-[4/5] w-full items-center justify-center bg-secondary">
+                          <ImageIcon className="h-10 w-10 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="space-y-3 border-t border-border p-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="composer-image">Thumbnail image URL</Label>
+                          <Input
+                            id="composer-image"
+                            value={activeDraft.image}
+                            onChange={(event) => updateActiveDraft({ image: event.target.value })}
+                            placeholder="https://..."
+                            className={isMissingThumbnail ? 'border-red-500 ring-1 ring-red-500' : undefined}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="composer-description-image">Article image URL</Label>
+                          <Input
+                            id="composer-description-image"
+                            value={activeDraft.descriptionImage}
+                            onChange={(event) => updateActiveDraft({ descriptionImage: event.target.value })}
+                            placeholder="https://..."
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="rounded-md border border-border p-3">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <Label htmlFor="composer-title-prefix-enabled" className="text-sm">
@@ -1199,26 +1504,6 @@ export function ArticleComposer() {
                         onBlur={(event) => setTitlePrefix(event.target.value.trim() || 'VT')}
                         disabled={!titlePrefixEnabled}
                         className="h-8"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="composer-image">Thumbnail image URL</Label>
-                      <Input
-                        id="composer-image"
-                        value={activeDraft.image}
-                        onChange={(event) => updateActiveDraft({ image: event.target.value })}
-                        placeholder="https://..."
-                        className={isMissingThumbnail ? 'border-red-500 ring-1 ring-red-500' : undefined}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="composer-description-image">Article image URL</Label>
-                      <Input
-                        id="composer-description-image"
-                        value={activeDraft.descriptionImage}
-                        onChange={(event) => updateActiveDraft({ descriptionImage: event.target.value })}
-                        placeholder="https://..."
                       />
                     </div>
 
