@@ -10,7 +10,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ToastAction } from '@/components/ui/toast'
 import {
   Dialog,
   DialogContent,
@@ -205,12 +204,7 @@ type SavedComposerState = {
   sourceDate?: string
   sourceStartTime?: string
   selectedPostIds?: string[]
-}
-
-type ComposerUndoSnapshot = {
-  drafts: ArticleDraft[]
-  activeIndex: number
-  dismissedPostIds: string[]
+  dismissedPostIds?: string[]
 }
 
 function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
@@ -412,7 +406,6 @@ export function ArticleComposer() {
   const [validationPulse, setValidationPulse] = useState(0)
   const [hasLoadedSavedComposerState, setHasLoadedSavedComposerState] = useState(false)
   const [dismissedPostIds, setDismissedPostIds] = useState<string[]>([])
-  const [undoSnapshot, setUndoSnapshot] = useState<ComposerUndoSnapshot | null>(null)
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
   const activeDraftWarnings = useMemo(() => getDraftWarnings(activeDraft), [activeDraft])
@@ -584,6 +577,10 @@ export function ArticleComposer() {
   }
 
   const removeActiveElement = () => {
+    if (activeDraft.sourcePostId) {
+      setDismissedPostIds((current) => Array.from(new Set([...current, activeDraft.sourcePostId])))
+    }
+
     if (drafts.length === 1) {
       setDrafts([])
       setActiveIndex(0)
@@ -607,16 +604,7 @@ export function ArticleComposer() {
     setSourceStartTime('00:00')
     setSelectedPostIds([])
     setDismissedPostIds([])
-    setUndoSnapshot(null)
     toast({ title: 'Composer reset' })
-  }
-
-  const undoLastComposerReset = (snapshot: ComposerUndoSnapshot) => {
-    setDrafts(snapshot.drafts.map((draft) => createDraft(draft)))
-    setActiveIndex(Math.min(snapshot.activeIndex, Math.max(0, snapshot.drafts.length - 1)))
-    setDismissedPostIds(snapshot.dismissedPostIds)
-    setUndoSnapshot(null)
-    toast({ title: 'Composer restored' })
   }
 
   const insertHtml = (snippet: string) => {
@@ -735,29 +723,9 @@ export function ArticleComposer() {
     })
 
     if (extensionAck.ok) {
-      const sentPostIds = new Set(readyItems.map((item) => item.schedulerPostId))
-      const snapshot: ComposerUndoSnapshot = {
-        drafts,
-        activeIndex,
-        dismissedPostIds,
-      }
-      setUndoSnapshot(snapshot)
-      setDismissedPostIds((current) => Array.from(new Set([...current, ...sentPostIds])))
-      setDrafts((current) => {
-        const next = current.filter((draft) => !sentPostIds.has(draft.sourcePostId))
-        return next
-      })
-      setActiveIndex(0)
-      setSelectedPostIds([])
-
       toast({
         title: 'Extension started',
-        description: `${readyItems.length} ready item${readyItems.length > 1 ? 's' : ''} sent and cleared.${skippedCount > 0 ? ` ${skippedCount} unfinished kept.` : ''}`,
-        action: (
-          <ToastAction altText="Undo composer clear" onClick={() => undoLastComposerReset(snapshot)}>
-            Undo
-          </ToastAction>
-        ),
+        description: `${readyItems.length} ready item${readyItems.length > 1 ? 's' : ''} sent. Composer content was kept.`,
       })
       return
     }
@@ -833,6 +801,7 @@ export function ArticleComposer() {
         setSourceDate(savedState.sourceDate ?? storeSelectedDate)
         setSourceStartTime(savedState.sourceStartTime ?? '00:00')
         setSelectedPostIds(savedState.selectedPostIds ?? [])
+        setDismissedPostIds(savedState.dismissedPostIds ?? [])
         window.localStorage.removeItem(composerStateStorageKey)
         setHasLoadedSavedComposerState(true)
       })
@@ -874,6 +843,8 @@ export function ArticleComposer() {
   }, [activeIndex, drafts.length])
 
   useEffect(() => {
+    if (!hasLoadedSavedComposerState) return
+
     const timeout = window.setTimeout(() => {
       void writeSavedComposerStateToDb({
         drafts,
@@ -885,6 +856,7 @@ export function ArticleComposer() {
         sourceDate,
         sourceStartTime,
         selectedPostIds,
+        dismissedPostIds,
       }).catch(() => {
         // Autosave is best-effort; avoid breaking editing when browser storage is full.
       })
@@ -893,7 +865,9 @@ export function ArticleComposer() {
     return () => window.clearTimeout(timeout)
   }, [
     activeIndex,
+    dismissedPostIds,
     drafts,
+    hasLoadedSavedComposerState,
     jsonInput,
     selectedPostIds,
     sourceDate,
