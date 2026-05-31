@@ -252,7 +252,7 @@ function normalizeItems(value: unknown) {
     }
   })
 
-  if (errors.length > 0) {
+  if (errors.length > 0 && items.length === 0) {
     throw new Error(errors.slice(0, 10).join('\n'))
   }
 
@@ -260,7 +260,7 @@ function normalizeItems(value: unknown) {
     throw new Error('No completed Daily Feji results were provided.')
   }
 
-  return items
+  return { items, errors }
 }
 
 function requireImportToken(request: Request) {
@@ -356,7 +356,9 @@ export async function POST(request: Request) {
     const postStatus: PostStatus = allowedStatuses.includes(postStatusValue as PostStatus)
       ? (postStatusValue as PostStatus)
       : 'draft'
-    const items = normalizeItems(payload.items)
+    const normalizedItems = normalizeItems(payload.items)
+    const items = normalizedItems.items
+    const importErrors = [...normalizedItems.errors]
     const itemsWithoutPostId = items.filter((item) => !item.schedulerPostId)
     const requiresScheduleLookup = itemsWithoutPostId.length > 0
 
@@ -424,11 +426,8 @@ export async function POST(request: Request) {
       })
 
       if (candidatePosts.length < itemsWithoutPostId.length) {
-        return jsonResponse(
-          {
-            error: `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${itemsWithoutPostId.length}, found ${candidatePosts.length}.`,
-          },
-          { status: 400 }
+        importErrors.push(
+          `Not enough scheduled posts from ${startDateForSearch} ${startTimeSlotForSearch}. Needed ${itemsWithoutPostId.length}, found ${candidatePosts.length}.`
         )
       }
     } else {
@@ -440,20 +439,15 @@ export async function POST(request: Request) {
 
       if (postsError) throw postsError
       existingPosts = (existingPostsData as ExistingPostRow[] | null) ?? []
-
-      const foundPostIds = new Set(existingPosts.map((post) => post.id))
-      const missingPostIds = postIds.filter((postId) => !foundPostIds.has(postId))
-      if (missingPostIds.length > 0) {
-        return jsonResponse(
-          {
-            error: `Post IDs were not found in this Scheduler database: ${missingPostIds.join(', ')}.`,
-          },
-          { status: 400 }
-        )
-      }
     }
 
     const updatedRows = []
+    const itemResults: Array<{
+      ok: boolean
+      post?: unknown
+      error?: string
+      warning?: string
+    }> = []
     const cleanedImagePaths: string[] = []
     let candidatePostIndex = 0
 
@@ -464,14 +458,18 @@ export async function POST(request: Request) {
         : candidatePosts[candidatePostIndex++]
 
       if (!post) {
-        return jsonResponse(
-          {
-            error: item.schedulerPostId
-              ? `Post ${item.schedulerPostId} was not found in this Scheduler database.`
-              : `No scheduled post found for item ${index + 1}.`,
-          },
-          { status: 400 }
+        importErrors.push(
+          item.schedulerPostId
+            ? `Item ${index + 1}: post ${item.schedulerPostId} was not found in this Scheduler database.`
+            : `Item ${index + 1}: no scheduled post found.`
         )
+        itemResults.push({
+          ok: false,
+          error: item.schedulerPostId
+            ? `Post ${item.schedulerPostId} was not found in this Scheduler database.`
+            : 'No scheduled post found.',
+        })
+        continue
       }
 
       const importedNotes = [
@@ -492,25 +490,46 @@ export async function POST(request: Request) {
         updatePayload.caption = item.caption
       }
 
-      const { data: updatedPostRows, error: updateError } = await supabase
-        .from('posts')
-        .update(updatePayload)
-        .eq('id', post.id)
-        .select('id,post_date,time_slot,caption,ads_link')
+      try {
+        const { data: updatedPostRows, error: updateError } = await supabase
+          .from('posts')
+          .update(updatePayload)
+          .eq('id', post.id)
+          .select('id,post_date,time_slot,caption,ads_link')
 
-      if (updateError) throw updateError
-      if (updatedPostRows?.[0]) {
-        updatedRows.push(updatedPostRows[0])
+        if (updateError) throw updateError
+        if (updatedPostRows?.[0]) {
+          updatedRows.push(updatedPostRows[0])
+          itemResults.push({ ok: true, post: updatedPostRows[0] })
+        } else {
+          itemResults.push({ ok: false, error: 'Scheduler post update returned no row.' })
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'failed to update Scheduler post.'
+        importErrors.push(`Item ${index + 1}: ${errorMessage}`)
+        itemResults.push({ ok: false, error: errorMessage })
+        continue
       }
 
-      const cleanedPaths = await cleanupDescriptionImages(supabase, item, post)
-      cleanedImagePaths.push(...cleanedPaths)
+      try {
+        const cleanedPaths = await cleanupDescriptionImages(supabase, item, post)
+        cleanedImagePaths.push(...cleanedPaths)
+      } catch (error) {
+        const warning = `Scheduler post was updated, but cleanup failed: ${
+          error instanceof Error ? error.message : 'unknown cleanup error.'
+        }`
+        importErrors.push(`Item ${index + 1}: ${warning}`)
+        const latestResult = itemResults[itemResults.length - 1]
+        if (latestResult?.ok) latestResult.warning = warning
+      }
     }
 
     return jsonResponse({
       updated: updatedRows.length,
       cleanedImages: cleanedImagePaths.length,
       posts: updatedRows,
+      results: itemResults,
+      errors: importErrors,
     })
   } catch (error) {
     return jsonResponse(

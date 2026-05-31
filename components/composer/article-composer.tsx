@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { useAppStore } from '@/lib/store'
+import { uploadPostImage } from '@/lib/supabase'
 import type { Post, PostStatus } from '@/lib/types'
 import {
   AlertTriangle,
@@ -40,6 +41,7 @@ import {
   Plug,
   Plus,
   RotateCcw,
+  Scissors,
   Trash2,
   Wand2,
 } from 'lucide-react'
@@ -205,6 +207,7 @@ type SavedComposerState = {
   sourceStartTime?: string
   selectedPostIds?: string[]
   dismissedPostIds?: string[]
+  splitPastedCollageByPageId?: Record<string, boolean>
 }
 
 function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
@@ -378,6 +381,115 @@ function hydrateDraftFromPost(draft: ArticleDraft, post: Post) {
   }
 }
 
+async function imageUrlToFile(imageUrl: string) {
+  const response = await fetch(imageUrl)
+  if (!response.ok) {
+    throw new Error(`Could not load thumbnail image (${response.status}).`)
+  }
+
+  const blob = await response.blob()
+  const extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg'
+  return new File([blob], `thumbnail-collage.${extension}`, {
+    type: blob.type || 'image/jpeg',
+  })
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => {
+      URL.revokeObjectURL(image.src)
+      reject(new Error('Could not read image.'))
+    }
+    image.src = URL.createObjectURL(file)
+  })
+}
+
+function cropImage(image: HTMLImageElement, crop: { x: number; y: number; width: number; height: number }) {
+  const canvas = document.createElement('canvas')
+  canvas.width = crop.width
+  canvas.height = crop.height
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Could not prepare image crop.')
+
+  context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob)
+      } else {
+        reject(new Error('Could not create image crop.'))
+      }
+    }, 'image/webp', 0.84)
+  })
+}
+
+async function splitFourByFiveCollageFile(file: File) {
+  const image = await loadImage(file)
+  const ratio = image.width / image.height
+  const isFourByFive = ratio > 0.74 && ratio < 0.86
+
+  if (!isFourByFive || image.width < 600 || image.height < 700) {
+    URL.revokeObjectURL(image.src)
+    throw new Error('The thumbnail is not a 4:5 collage image.')
+  }
+
+  const halfHeight = Math.floor(image.height / 2)
+  const halfWidth = Math.floor(image.width / 2)
+  const cropDefinitions = [
+    { x: 0, y: 0, width: image.width, height: halfHeight },
+    { x: 0, y: halfHeight, width: halfWidth, height: image.height - halfHeight },
+    { x: halfWidth, y: halfHeight, width: image.width - halfWidth, height: image.height - halfHeight },
+  ]
+
+  try {
+    return await Promise.all(
+      cropDefinitions.map(async (crop, index) => {
+        const blob = await cropImage(image, crop)
+        return new File([blob], `article-crop-${index + 1}.webp`, { type: 'image/webp' })
+      })
+    )
+  } finally {
+    URL.revokeObjectURL(image.src)
+  }
+}
+
+function shuffleItems<T>(items: T[]) {
+  const next = [...items]
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    ;[next[index], next[swapIndex]] = [next[swapIndex], next[index]]
+  }
+  return next
+}
+
+function insertImagesIntoHtml(html: string, imageUrls: string[]) {
+  const imageBlocks = shuffleItems(imageUrls).map(
+    (imageUrl) => `<p><img src="${escapeHtml(imageUrl)}" loading="lazy" /></p>`
+  )
+  if (!html.trim()) return imageBlocks.join('\n')
+
+  const parser = new DOMParser()
+  const document = parser.parseFromString(`<div>${html}</div>`, 'text/html')
+  const root = document.body.firstElementChild
+  if (!root) return `${html}\n${imageBlocks.join('\n')}`
+
+  const paragraphs = Array.from(root.querySelectorAll('p')).filter((paragraph) => paragraph.textContent?.trim())
+  if (paragraphs.length === 0) {
+    root.insertAdjacentHTML('beforeend', imageBlocks.join('\n'))
+    return root.innerHTML
+  }
+
+  for (const imageBlock of imageBlocks) {
+    const target = paragraphs[Math.floor(Math.random() * paragraphs.length)]
+    target.insertAdjacentHTML(Math.random() > 0.5 ? 'afterend' : 'beforebegin', imageBlock)
+  }
+
+  return root.innerHTML
+}
+
 export function ArticleComposer() {
   const posts = useAppStore((state) => state.posts)
   const pages = useAppStore((state) => state.pages)
@@ -397,6 +509,7 @@ export function ArticleComposer() {
     () => readTitlePrefixPreferences().enabled
   )
   const [titlePrefix, setTitlePrefix] = useState(() => readTitlePrefixPreferences().prefix)
+  const [splitPastedCollageByPageId, setSplitPastedCollageByPageId] = useState<Record<string, boolean>>({})
   const [extensionSchedulerToken, setExtensionSchedulerToken] = useState(
     () => readExtensionSchedulerConfig().token
   )
@@ -406,12 +519,34 @@ export function ArticleComposer() {
   const [validationPulse, setValidationPulse] = useState(0)
   const [hasLoadedSavedComposerState, setHasLoadedSavedComposerState] = useState(false)
   const [dismissedPostIds, setDismissedPostIds] = useState<string[]>([])
+  const [isStartingExtension, setIsStartingExtension] = useState(false)
+  const [isInsertingCollageImages, setIsInsertingCollageImages] = useState(false)
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
   const activeDraftWarnings = useMemo(() => getDraftWarnings(activeDraft), [activeDraft])
   const draftWarningCounts = useMemo(
     () => drafts.map((draft) => getDraftWarnings(draft).length),
     [drafts]
+  )
+  const orderedDrafts = useMemo(
+    () =>
+      drafts
+        .map((draft, index) => ({
+          draft,
+          index,
+          sourcePost: posts.find((post) => post.id === draft.sourcePostId),
+        }))
+        .sort((first, second) => {
+          if (first.sourcePost && second.sourcePost) {
+            return comparePostsBySchedule(first.sourcePost, second.sourcePost)
+          }
+
+          if (first.sourcePost) return -1
+          if (second.sourcePost) return 1
+          return first.index - second.index
+        })
+        .map((entry) => entry.draft),
+    [drafts, posts]
   )
   const showActiveValidation = validationPulse > 0 && activeDraftWarnings.length > 0
   const isMissingTitle = showActiveValidation && !activeDraft.title.trim()
@@ -421,8 +556,8 @@ export function ArticleComposer() {
   const isMissingPostCaption =
     showActiveValidation && Boolean(activeDraft.sourcePostId.trim()) && !activeDraft.postCaption.trim()
   const generatedJson = useMemo(
-    () => buildJson(drafts, titlePrefix, titlePrefixEnabled),
-    [drafts, titlePrefix, titlePrefixEnabled]
+    () => buildJson(orderedDrafts, titlePrefix, titlePrefixEnabled),
+    [orderedDrafts, titlePrefix, titlePrefixEnabled]
   )
   const wordCount = useMemo(() => getWordCount(activeDraft.description), [activeDraft.description])
   const sourceCandidates = useMemo(() => {
@@ -469,6 +604,8 @@ export function ArticleComposer() {
     () => posts.find((post) => post.id === activeDraft.sourcePostId),
     [activeDraft.sourcePostId, posts]
   )
+  const splitPastedCollagePageKey = sourcePageId || 'all'
+  const splitPastedCollage = splitPastedCollageByPageId[splitPastedCollagePageKey] ?? false
   const captionTargetPosts = useMemo(() => {
     if (!activeSourcePost || sourceCandidates.some((post) => post.id === activeSourcePost.id)) {
       return sourceCandidates
@@ -497,6 +634,15 @@ export function ArticleComposer() {
         const postMinutes = parseTimeSlotMinutes(sourcePost.timeSlot)
         return postMinutes === null || postMinutes >= startMinutes
       })
+      .sort((first, second) => {
+        if (first.sourcePost && second.sourcePost) {
+          return comparePostsBySchedule(first.sourcePost, second.sourcePost)
+        }
+
+        if (first.sourcePost) return -1
+        if (second.sourcePost) return 1
+        return first.index - second.index
+      })
   }, [drafts, posts, sourceDate, sourcePageId, sourceShowAll, sourceStartTime, sourceStatus])
 
   const getPageName = (pageId: string) => {
@@ -507,6 +653,13 @@ export function ArticleComposer() {
     setDrafts((current) =>
       current.map((draft, index) => (index === activeIndex ? { ...draft, ...updates } : draft))
     )
+  }
+
+  const updateSplitPastedCollage = (checked: boolean) => {
+    setSplitPastedCollageByPageId((current) => ({
+      ...current,
+      [splitPastedCollagePageKey]: checked,
+    }))
   }
 
   const selectElement = (index: number) => {
@@ -604,6 +757,7 @@ export function ArticleComposer() {
     setSourceStartTime('00:00')
     setSelectedPostIds([])
     setDismissedPostIds([])
+    setSplitPastedCollageByPageId({})
     toast({ title: 'Composer reset' })
   }
 
@@ -613,14 +767,70 @@ export function ArticleComposer() {
     })
   }
 
+  const insertCollageImages = async () => {
+    if (isInsertingCollageImages) return
+
+    if (!splitPastedCollage) {
+      toast({
+        title: '4:5 split is off',
+        description: 'Turn on Split pasted 4:5 before inserting collage images.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (!activeDraft.image.trim()) {
+      toast({
+        title: 'Missing thumbnail',
+        description: 'Add a Thumbnail image URL first.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsInsertingCollageImages(true)
+    try {
+      const sourceFile = await imageUrlToFile(activeDraft.image.trim())
+      const crops = await splitFourByFiveCollageFile(sourceFile)
+      const uploadedImages = await Promise.all(crops.map((crop) => uploadPostImage(crop)))
+      const imageUrls = uploadedImages.map((image) => image.imageUrl)
+      updateActiveDraft({
+        description: insertImagesIntoHtml(activeDraft.description, imageUrls),
+      })
+      toast({ title: '4:5 images inserted', description: `${imageUrls.length} article images added.` })
+    } catch (error) {
+      toast({
+        title: 'Could not insert 4:5 images',
+        description:
+          error instanceof Error
+            ? error.message
+            : 'Check that the thumbnail URL is reachable and uses a 4:5 collage.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsInsertingCollageImages(false)
+    }
+  }
+
   const copyJson = async () => {
     await navigator.clipboard.writeText(generatedJson)
     toast({ title: 'JSON copied' })
   }
 
+  const copyExtensionItems = async (readyItems: ReturnType<typeof buildExtensionItems>) => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(readyItems, null, 2))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const prepareExtensionPayload = async () => {
-    const readyItems = buildExtensionItems(drafts, titlePrefix, titlePrefixEnabled)
-    const skippedCount = drafts.length - readyItems.length
+    if (isStartingExtension) return
+
+    const readyItems = buildExtensionItems(orderedDrafts, titlePrefix, titlePrefixEnabled)
+    const skippedCount = orderedDrafts.length - readyItems.length
 
     if (readyItems.length === 0) {
       const firstInvalidIndex = drafts.findIndex((draft) => getDraftWarnings(draft).length > 0)
@@ -649,95 +859,112 @@ export function ArticleComposer() {
       }
     }
 
-    window.localStorage.setItem(
-      extensionPayloadStorageKey,
-      JSON.stringify({
-        createdAt: new Date().toISOString(),
-        items: readyItems,
-      })
-    )
+    setIsStartingExtension(true)
 
-    const bridgeDetected = await new Promise<boolean>((resolve) => {
-      const timeout = window.setTimeout(() => {
-        window.removeEventListener('message', handlePong)
-        resolve(false)
-      }, 800)
-
-      function handlePong(event: MessageEvent) {
-        if (event.source !== window || event.data?.type !== extensionPongMessageType) return
-        window.clearTimeout(timeout)
-        window.removeEventListener('message', handlePong)
-        resolve(true)
-      }
-
-      window.addEventListener('message', handlePong)
-      window.postMessage({ type: extensionPingMessageType }, window.location.origin)
-    })
-
-    if (!bridgeDetected) {
-      await navigator.clipboard.writeText(JSON.stringify(readyItems, null, 2))
-      toast({
-        title: 'Extension bridge not injected',
-        description:
-          `Ready JSON copied instead. ${skippedCount > 0 ? `${skippedCount} unfinished element${skippedCount > 1 ? 's' : ''} skipped. ` : ''}Reload Daily Feji extension in chrome://extensions, then reload this Composer tab.`,
-        variant: 'destructive',
-      })
-      return
-    }
-
-    const extensionAck = await new Promise<{ ok: boolean; error: string }>((resolve) => {
-      const timeout = window.setTimeout(() => {
-        window.removeEventListener('message', handleAck)
-        resolve({ ok: false, error: '' })
-      }, 3000)
-
-      function handleAck(event: MessageEvent) {
-        if (event.source !== window || event.data?.type !== extensionAckMessageType) return
-        window.clearTimeout(timeout)
-        window.removeEventListener('message', handleAck)
-        resolve({
-          ok: event.data.ok === true,
-          error: String(event.data.error || ''),
+    try {
+      window.localStorage.setItem(
+        extensionPayloadStorageKey,
+        JSON.stringify({
+          createdAt: new Date().toISOString(),
+          items: readyItems,
         })
+      )
+
+      toast({
+        title: 'Sending to extension',
+        description: `${readyItems.length} ready item${readyItems.length > 1 ? 's' : ''} prepared.`,
+      })
+
+      const bridgeDetected = await new Promise<boolean>((resolve) => {
+        const timeout = window.setTimeout(() => {
+          window.removeEventListener('message', handlePong)
+          resolve(false)
+        }, 800)
+
+        function handlePong(event: MessageEvent) {
+          if (event.source !== window || event.data?.type !== extensionPongMessageType) return
+          window.clearTimeout(timeout)
+          window.removeEventListener('message', handlePong)
+          resolve(true)
+        }
+
+        window.addEventListener('message', handlePong)
+        window.postMessage({ type: extensionPingMessageType }, window.location.origin)
+      })
+
+      if (!bridgeDetected) {
+        const copied = await copyExtensionItems(readyItems)
+        toast({
+          title: 'Extension bridge not injected',
+          description:
+            `${copied ? 'Ready JSON copied instead. ' : 'Ready JSON was saved locally, but clipboard copy was blocked. '}${skippedCount > 0 ? `${skippedCount} unfinished element${skippedCount > 1 ? 's' : ''} skipped. ` : ''}Reload Daily Feji extension in chrome://extensions, then reload this Composer tab.`,
+          variant: 'destructive',
+        })
+        return
       }
 
-      window.addEventListener('message', handleAck)
-      window.postMessage(
-        {
-          type: extensionStartMessageType,
-          payload: {
-            items: readyItems,
-            options: {
-              imagePlacement: 'none',
-            },
-            scheduler: {
-              enabled: Boolean(schedulerToken),
-              schedulerUrl: window.location.origin,
-              token: schedulerToken,
-              status: extensionSchedulerStatus,
+      const extensionAck = await new Promise<{ ok: boolean; error: string }>((resolve) => {
+        const timeout = window.setTimeout(() => {
+          window.removeEventListener('message', handleAck)
+          resolve({ ok: false, error: '' })
+        }, 3000)
+
+        function handleAck(event: MessageEvent) {
+          if (event.source !== window || event.data?.type !== extensionAckMessageType) return
+          window.clearTimeout(timeout)
+          window.removeEventListener('message', handleAck)
+          resolve({
+            ok: event.data.ok === true,
+            error: String(event.data.error || ''),
+          })
+        }
+
+        window.addEventListener('message', handleAck)
+        window.postMessage(
+          {
+            type: extensionStartMessageType,
+            payload: {
+              items: readyItems,
+              options: {
+                imagePlacement: 'none',
+              },
+              scheduler: {
+                enabled: Boolean(schedulerToken),
+                schedulerUrl: window.location.origin,
+                token: schedulerToken,
+                status: extensionSchedulerStatus,
+              },
             },
           },
-        },
-        window.location.origin
-      )
-    })
-
-    if (extensionAck.ok) {
-      toast({
-        title: 'Extension started',
-        description: `${readyItems.length} ready item${readyItems.length > 1 ? 's' : ''} sent. Composer content was kept.`,
+          window.location.origin
+        )
       })
-      return
-    }
 
-    await navigator.clipboard.writeText(JSON.stringify(readyItems, null, 2))
-    toast({
-      title: extensionAck.error ? 'Extension error' : 'Extension not detected',
-      description: extensionAck.error
-        ? `${extensionAck.error}. Ready JSON copied instead.`
-        : 'Ready JSON copied instead. Bridge is injected, but extension background did not acknowledge the batch.',
-      variant: 'destructive',
-    })
+      if (extensionAck.ok) {
+        toast({
+          title: 'Extension started',
+          description: `${readyItems.length} ready item${readyItems.length > 1 ? 's' : ''} sent. Composer content was kept.`,
+        })
+        return
+      }
+
+      const copied = await copyExtensionItems(readyItems)
+      toast({
+        title: extensionAck.error ? 'Extension error' : 'Extension not detected',
+        description: extensionAck.error
+          ? `${extensionAck.error}. ${copied ? 'Ready JSON copied instead.' : 'Ready JSON was saved locally, but clipboard copy was blocked.'}`
+          : `${copied ? 'Ready JSON copied instead.' : 'Ready JSON was saved locally, but clipboard copy was blocked.'} Bridge is injected, but extension background did not acknowledge the batch.`,
+        variant: 'destructive',
+      })
+    } catch (error) {
+      toast({
+        title: 'Extension failed',
+        description: error instanceof Error ? error.message : 'Could not prepare extension payload.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsStartingExtension(false)
+    }
   }
 
   const copyDescription = async () => {
@@ -802,6 +1029,7 @@ export function ArticleComposer() {
         setSourceStartTime(savedState.sourceStartTime ?? '00:00')
         setSelectedPostIds(savedState.selectedPostIds ?? [])
         setDismissedPostIds(savedState.dismissedPostIds ?? [])
+        setSplitPastedCollageByPageId(savedState.splitPastedCollageByPageId ?? {})
         window.localStorage.removeItem(composerStateStorageKey)
         setHasLoadedSavedComposerState(true)
       })
@@ -857,6 +1085,7 @@ export function ArticleComposer() {
         sourceStartTime,
         selectedPostIds,
         dismissedPostIds,
+        splitPastedCollageByPageId,
       }).catch(() => {
         // Autosave is best-effort; avoid breaking editing when browser storage is full.
       })
@@ -870,6 +1099,7 @@ export function ArticleComposer() {
     hasLoadedSavedComposerState,
     jsonInput,
     selectedPostIds,
+    splitPastedCollageByPageId,
     sourceDate,
     sourcePageId,
     sourceShowAll,
@@ -938,9 +1168,9 @@ export function ArticleComposer() {
                 </SelectContent>
               </Select>
             </div>
-            <Button type="button" onClick={prepareExtensionPayload}>
+            <Button type="button" onClick={prepareExtensionPayload} disabled={isStartingExtension}>
               <Plug className="mr-2 h-4 w-4" />
-              Extension
+              {isStartingExtension ? 'Starting...' : 'Extension'}
             </Button>
             <Dialog>
               <DialogTrigger asChild>
@@ -1407,7 +1637,26 @@ export function ArticleComposer() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <Label>Description editor</Label>
-                        <span className="text-xs text-muted-foreground">{wordCount} words</span>
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Switch
+                              checked={splitPastedCollage}
+                              onCheckedChange={updateSplitPastedCollage}
+                            />
+                            Split pasted 4:5
+                          </label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={insertCollageImages}
+                            disabled={isInsertingCollageImages}
+                          >
+                            <Scissors className="mr-2 h-4 w-4" />
+                            {isInsertingCollageImages ? 'Adding...' : 'Add 4:5'}
+                          </Button>
+                          <span className="text-xs text-muted-foreground">{wordCount} words</span>
+                        </div>
                       </div>
                       <div
                         className={
@@ -1419,6 +1668,8 @@ export function ArticleComposer() {
                         <TinyMceHtmlEditor
                           value={activeDraft.description}
                           onChange={(description) => updateActiveDraft({ description })}
+                          splitPastedCollage={splitPastedCollage}
+                          collageSourceUrl={activeDraft.image}
                         />
                       </div>
                     </div>
@@ -1721,7 +1972,7 @@ export function ArticleComposer() {
             </CardHeader>
             <CardContent>
               <div className="max-h-[760px] space-y-6 overflow-y-auto pr-2">
-                {drafts.map((draft, index) => (
+                {orderedDrafts.map((draft, index) => (
                   <div key={index} className="grid gap-6 border-b border-border pb-6 last:border-0 last:pb-0 lg:grid-cols-[220px_1fr]">
                     <div className="overflow-hidden rounded-lg border border-border bg-secondary">
                       {draft.image ? (

@@ -30,8 +30,12 @@ import type {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+const cloudinaryCloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+const cloudinaryUploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
+const cloudinaryFolder = process.env.NEXT_PUBLIC_CLOUDINARY_FOLDER || 'post-images'
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey)
+const isCloudinaryConfigured = Boolean(cloudinaryCloudName && cloudinaryUploadPreset)
 
 declare global {
   interface Window {
@@ -1164,17 +1168,23 @@ export async function deletePostRemote(id: string) {
 }
 
 export async function uploadPostImage(file: File) {
+  const uploadFile = await normalizeImageForUpload(file)
+
+  if (isCloudinaryConfigured) {
+    return uploadPostImageToCloudinary(uploadFile)
+  }
+
   const client = requireSupabase()
-  const fileExtension = file.name.split('.').pop() || 'jpg'
+  const fileExtension = uploadFile.name.split('.').pop() || 'jpg'
   const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExtension}`
   const filePath = `posts/${fileName}`
 
   const { error: uploadError } = await client.storage
     .from('post-images')
-    .upload(filePath, file, {
+    .upload(filePath, uploadFile, {
       cacheControl: '3600',
       upsert: false,
-      contentType: file.type,
+      contentType: uploadFile.type,
     })
 
   if (uploadError) throw uploadError
@@ -1185,4 +1195,74 @@ export async function uploadPostImage(file: File) {
     imagePath: filePath,
     imageUrl: data.publicUrl,
   }
+}
+
+async function uploadPostImageToCloudinary(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('upload_preset', cloudinaryUploadPreset!)
+  formData.append('folder', cloudinaryFolder)
+
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
+    method: 'POST',
+    body: formData,
+  })
+  const data = await response.json()
+
+  if (!response.ok) {
+    const message = data?.error?.message || 'Cloudinary image upload failed.'
+    throw new Error(message)
+  }
+
+  return {
+    imagePath: data.public_id as string,
+    imageUrl: data.secure_url as string,
+  }
+}
+
+async function normalizeImageForUpload(file: File) {
+  if (
+    typeof window === 'undefined' ||
+    !file.type.startsWith('image/') ||
+    file.type === 'image/gif' ||
+    file.type === 'image/svg+xml'
+  ) {
+    return file
+  }
+
+  const image = await loadImage(file)
+  const maxEdge = 1600
+  const scale = Math.min(1, maxEdge / Math.max(image.width, image.height))
+  const width = Math.round(image.width * scale)
+  const height = Math.round(image.height * scale)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) return file
+
+  context.drawImage(image, 0, 0, width, height)
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, 'image/webp', 0.82)
+  })
+
+  URL.revokeObjectURL(image.src)
+  if (!blob || blob.size >= file.size) return file
+
+  const baseName = file.name.replace(/\.[^.]+$/, '') || 'image'
+  return new File([blob], `${baseName}.webp`, { type: 'image/webp' })
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => {
+      URL.revokeObjectURL(image.src)
+      reject(new Error('Could not read image before upload.'))
+    }
+    image.src = URL.createObjectURL(file)
+  })
 }

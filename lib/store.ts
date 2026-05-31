@@ -110,6 +110,23 @@ function withDerivedState(
   }
 }
 
+let isSupabaseRuntimeAvailable = isSupabaseConfigured
+
+function isSupabaseQuotaRestriction(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error && 'message' in error
+        ? String((error as { message?: unknown }).message)
+        : ''
+
+  return message.includes('exceed_cached_egress_quota') || message.includes('project is restricted')
+}
+
+function shouldUseSupabaseRemote() {
+  return isSupabaseConfigured && isSupabaseRuntimeAvailable
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   pages: isSupabaseConfigured ? [] : mockPages,
   posts: isSupabaseConfigured ? [] : mockPosts,
@@ -123,7 +140,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isSyncing: false,
 
   initializeApp: async () => {
-    if (!isSupabaseConfigured || get().isInitialized) return
+    if (!shouldUseSupabaseRemote() || get().isInitialized) return
 
     set({ isSyncing: true })
     try {
@@ -135,7 +152,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         isSyncing: false,
       }))
     } catch (error) {
-      console.error('Failed to initialize Supabase data:', error)
+      if (isSupabaseQuotaRestriction(error)) {
+        isSupabaseRuntimeAvailable = false
+        console.warn('Supabase is restricted by project quota. Falling back to local demo data for this session.')
+      } else {
+        console.error('Failed to initialize Supabase data:', error)
+      }
+
       set({
         pages: mockPages,
         posts: mockPosts,
@@ -149,7 +172,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   addPage: async (pageData) => {
     set({ isSyncing: true })
     try {
-      const newPage = isSupabaseConfigured
+      const newPage = shouldUseSupabaseRemote()
         ? await createPageRemote(pageData)
         : {
             ...pageData,
@@ -176,7 +199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updatePage: async (id, updates) => {
     set({ isSyncing: true })
     try {
-      const updatedPage = isSupabaseConfigured
+      const updatedPage = shouldUseSupabaseRemote()
         ? await updatePageRemote(id, updates)
         : null
 
@@ -198,7 +221,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deletePage: async (id) => {
     set({ isSyncing: true })
     try {
-      if (isSupabaseConfigured) {
+      if (shouldUseSupabaseRemote()) {
         await deletePageRemote(id)
       }
       set((state) => {
@@ -224,7 +247,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   addPost: async (postData) => {
     set({ isSyncing: true })
     try {
-      const newPost = isSupabaseConfigured
+      const newPost = shouldUseSupabaseRemote()
         ? await createPostRemote(postData)
         : {
             ...postData,
@@ -251,7 +274,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updatePost: async (id, updates) => {
     set({ isSyncing: true })
     try {
-      const updatedPost = isSupabaseConfigured
+      const updatedPost = shouldUseSupabaseRemote()
         ? await updatePostRemote(id, updates)
         : null
 
@@ -273,7 +296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deletePost: async (id) => {
     set({ isSyncing: true })
     try {
-      if (isSupabaseConfigured) {
+      if (shouldUseSupabaseRemote()) {
         await deletePostRemote(id)
       }
       set((state) => {
