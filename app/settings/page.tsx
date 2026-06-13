@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Bell,
   Clock,
+  CloudUpload,
   Database,
   Download,
   Loader2,
@@ -58,11 +59,19 @@ function summarizeImport(summary: ImportSummary) {
     .join(', ')
 }
 
+type GoogleBackupResponse = {
+  ok: boolean
+  error?: string
+  totalRows?: number
+  spreadsheetUrl?: string
+}
+
 export default function SettingsPage() {
   const { resolvedTheme, setTheme } = useTheme()
   const { toast } = useToast()
   const [mounted, setMounted] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isGoogleBackingUp, setIsGoogleBackingUp] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importMode, setImportMode] = useState<ImportMode>('merge')
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
@@ -73,7 +82,8 @@ export default function SettingsPage() {
   }, [])
 
   const isDarkMode = mounted ? resolvedTheme !== 'light' : true
-  const dataActionsDisabled = !isSupabaseConfigured || isExporting || isImporting
+  const supabaseDataActionsDisabled = !isSupabaseConfigured || isExporting || isImporting
+  const googleBackupDisabled = isGoogleBackingUp || isExporting || isImporting
 
   const handleExportAll = async () => {
     setIsExporting(true)
@@ -92,6 +102,38 @@ export default function SettingsPage() {
       })
     } finally {
       setIsExporting(false)
+    }
+  }
+
+  const handleGoogleBackup = async () => {
+    setIsGoogleBackingUp(true)
+    try {
+      const response = await fetch('/api/backup/google', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const result = (await response.json().catch(() => null)) as GoogleBackupResponse | null
+
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || 'Could not create Google backup.')
+      }
+
+      toast({
+        title: 'Google backup complete',
+        description: `Synced ${result.totalRows ?? 0} Supabase rows to Google Sheets.`,
+      })
+
+      if (result.spreadsheetUrl) {
+        window.open(result.spreadsheetUrl, '_blank', 'noopener,noreferrer')
+      }
+    } catch (error) {
+      toast({
+        title: 'Google backup failed',
+        description: error instanceof Error ? error.message : 'Could not create Google backup.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsGoogleBackingUp(false)
     }
   }
 
@@ -273,11 +315,30 @@ export default function SettingsPage() {
                   type="button"
                   variant="outline"
                   onClick={handleExportAll}
-                  disabled={dataActionsDisabled}
+                  disabled={supabaseDataActionsDisabled}
                   className="gap-2"
                 >
                   {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   Export All
+                </Button>
+              </div>
+
+              <div className="grid gap-4 rounded-md border border-border p-4 md:grid-cols-[1fr_auto] md:items-center">
+                <div className="space-y-1">
+                  <Label>Google Sheets backup</Label>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Sync Supabase rows into Google Sheets as database-style backup tables.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleGoogleBackup}
+                  disabled={googleBackupDisabled}
+                  className="gap-2"
+                >
+                  {isGoogleBackingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+                  Sync to Google
                 </Button>
               </div>
 
@@ -317,14 +378,14 @@ export default function SettingsPage() {
                     type="file"
                     accept="application/json,.json"
                     onChange={handleImportFileChange}
-                    disabled={dataActionsDisabled}
+                    disabled={supabaseDataActionsDisabled}
                     className="hidden"
                   />
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={dataActionsDisabled}
+                    disabled={supabaseDataActionsDisabled}
                     className="gap-2 md:w-fit"
                   >
                     {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
