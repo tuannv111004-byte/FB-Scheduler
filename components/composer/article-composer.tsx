@@ -349,20 +349,39 @@ function buildExtensionItems(drafts: ArticleDraft[], titlePrefix: string, titleP
     }))
 }
 
-function normalizeImportedDraft(item: unknown): ArticleDraft {
-  if (!item || typeof item !== 'object') {
-    return createDraft()
+function normalizeImportedDraft(item: unknown, index: number): Partial<ArticleDraft> {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    throw new Error(`Item ${index + 1} must be a JSON object.`)
   }
 
   const record = item as Record<string, unknown>
-  return createDraft({
-    title: typeof record.title === 'string' ? record.title : '',
-    description: typeof record.description === 'string' ? record.description : '',
-    image: typeof record.image === 'string' ? record.image : '',
-    descriptionImage: typeof record.descriptionImage === 'string' ? record.descriptionImage : '',
-    sourcePostId: typeof record.sourcePostId === 'string' ? record.sourcePostId : '',
-    postCaption: typeof record.postCaption === 'string' ? record.postCaption : '',
-  })
+  const importedDraft: Partial<ArticleDraft> = {}
+  const importString = (sourceKey: string, targetKey: keyof ArticleDraft) => {
+    if (!(sourceKey in record)) return false
+    if (typeof record[sourceKey] !== 'string') {
+      throw new Error(`Item ${index + 1}: ${sourceKey} must be a string.`)
+    }
+
+    importedDraft[targetKey] = record[sourceKey]
+    return true
+  }
+
+  importString('title', 'title')
+  if (!importString('description', 'description')) {
+    importString('article', 'description')
+  }
+  importString('image', 'image')
+  importString('descriptionImage', 'descriptionImage')
+
+  if (!importString('sourcePostId', 'sourcePostId')) {
+    importString('schedulerPostId', 'sourcePostId')
+  }
+
+  if (!importString('postCaption', 'postCaption')) {
+    importString('caption', 'postCaption')
+  }
+
+  return importedDraft
 }
 
 function createDraftFromPost(post: Post) {
@@ -497,6 +516,7 @@ export function ArticleComposer() {
   const [drafts, setDrafts] = useState<ArticleDraft[]>(() => [])
   const [activeIndex, setActiveIndex] = useState(0)
   const [jsonInput, setJsonInput] = useState('')
+  const [elementJsonInput, setElementJsonInput] = useState('')
   const [sourcePageId, setSourcePageId] = useState('all')
   const [sourceStatus, setSourceStatus] = useState<PostStatus | 'all'>(
     'draft'
@@ -669,6 +689,7 @@ export function ArticleComposer() {
       : undefined
 
     setActiveIndex(index)
+    setElementJsonInput('')
 
     if (!draft || !sourcePost) return
 
@@ -981,7 +1002,17 @@ export function ArticleComposer() {
       throw new Error('JSON must contain at least one item.')
     }
 
-    setDrafts(importedDrafts)
+    setDrafts((current) => {
+      const next = [...current]
+
+      importedDrafts.forEach((importedDraft, index) => {
+        next[index] = next[index]
+          ? { ...next[index], ...importedDraft }
+          : createDraft(importedDraft)
+      })
+
+      return next
+    })
     setActiveIndex(0)
   }
 
@@ -992,6 +1023,47 @@ export function ArticleComposer() {
     } catch (error) {
       toast({
         title: 'Import failed',
+        description: error instanceof Error ? error.message : 'Invalid JSON.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleImportActiveElementJson = () => {
+    try {
+      const parsed = JSON.parse(elementJsonInput) as unknown
+      const items = Array.isArray(parsed) ? parsed : [parsed]
+
+      if (items.length !== 1) {
+        throw new Error('Paste exactly one JSON object for the open element.')
+      }
+
+      const importedDraft = normalizeImportedDraft(items[0], 0)
+      const contentUpdates: Partial<ArticleDraft> = {}
+
+      if (importedDraft.title !== undefined) contentUpdates.title = importedDraft.title
+      if (importedDraft.description !== undefined) contentUpdates.description = importedDraft.description
+      if (importedDraft.postCaption !== undefined) contentUpdates.postCaption = importedDraft.postCaption
+
+      if (Object.keys(contentUpdates).length === 0) {
+        throw new Error('JSON must include title, description/article, or postCaption/caption.')
+      }
+
+      setDrafts((current) => {
+        if (current.length === 0) return [createDraft(contentUpdates)]
+
+        return current.map((draft, index) =>
+          index === activeIndex ? { ...draft, ...contentUpdates } : draft
+        )
+      })
+      setElementJsonInput('')
+      toast({
+        title: 'Element JSON loaded',
+        description: 'Content updated. Image, page, schedule, and post link were preserved.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Element import failed',
         description: error instanceof Error ? error.message : 'Invalid JSON.',
         variant: 'destructive',
       })
@@ -1207,8 +1279,11 @@ export function ArticleComposer() {
                         value={jsonInput}
                         onChange={(event) => setJsonInput(event.target.value)}
                         className="h-[478px] resize-none overflow-y-auto font-mono text-xs"
-                        placeholder='[{"title":"","description":"","image":""}]'
+                        placeholder='[{"title":"","description":"","postCaption":""}]'
                       />
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Items merge by order. Omitted image and Scheduler fields stay unchanged.
+                      </p>
                     </CardContent>
                   </Card>
                 </div>
@@ -1593,6 +1668,34 @@ export function ArticleComposer() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="rounded-md border border-border bg-secondary/30 p-3">
+                  <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <Label htmlFor="active-element-json">Import JSON into this element</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Loads title, article, and caption only. Existing image and Scheduler details stay unchanged.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImportActiveElementJson}
+                      disabled={!elementJsonInput.trim()}
+                    >
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Load into Element {activeIndex + 1}
+                    </Button>
+                  </div>
+                  <Textarea
+                    id="active-element-json"
+                    value={elementJsonInput}
+                    onChange={(event) => setElementJsonInput(event.target.value)}
+                    className="h-28 resize-y font-mono text-xs"
+                    placeholder='{"title":"","description":"<p>...</p>","postCaption":""}'
+                  />
+                </div>
+
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
                   <div className="space-y-4">
                     {activeDraftWarnings.length > 0 ? (
