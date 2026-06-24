@@ -7,6 +7,7 @@ import { AlertsWidget } from '@/components/dashboard/alerts-widget'
 import { PageSummaryWidget } from '@/components/dashboard/page-summary'
 import { UpcomingSlotsWidget } from '@/components/dashboard/upcoming-slots'
 import { MissingSlotsWidget } from '@/components/dashboard/missing-slots'
+import { BackupSafetyAlert } from '@/components/backup/backup-safety-alert'
 
 export default function DashboardPage() {
   return (
@@ -15,6 +16,8 @@ export default function DashboardPage() {
       <main className="app-main transition-[margin] md:ml-64">
         <Header title="Dashboard" subtitle="Overview of today's posting schedule" />
         <div className="p-6 space-y-6">
+          <BackupSafetyAlert />
+
           {/* Stats Cards */}
           <StatsCards />
 

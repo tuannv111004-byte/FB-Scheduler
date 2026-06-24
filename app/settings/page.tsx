@@ -41,6 +41,8 @@ import {
   type ImportSummary,
 } from '@/lib/data-transfer'
 import { isSupabaseConfigured } from '@/lib/supabase'
+import { BackupSafetyAlert } from '@/components/backup/backup-safety-alert'
+import { recordBackupFailure, recordBackupSuccess } from '@/lib/backup-health'
 
 function downloadJsonFile(fileName: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -64,6 +66,7 @@ type GoogleBackupResponse = {
   error?: string
   totalRows?: number
   spreadsheetUrl?: string
+  exportedAt?: string
 }
 
 export default function SettingsPage() {
@@ -90,11 +93,14 @@ export default function SettingsPage() {
     try {
       const backup = await exportPostOpsBackup()
       downloadJsonFile(buildBackupFileName(), backup)
+      const totalRows = Object.values(backup.tables).reduce((sum, rows) => sum + rows.length, 0)
+      recordBackupSuccess({ method: 'json', completedAt: backup.exportedAt, totalRows })
       toast({
         title: 'Export complete',
         description: 'PostOps backup JSON has been downloaded.',
       })
     } catch (error) {
+      recordBackupFailure('json', error)
       toast({
         title: 'Export failed',
         description: error instanceof Error ? error.message : 'Could not export data.',
@@ -118,6 +124,12 @@ export default function SettingsPage() {
         throw new Error(result?.error || 'Could not create Google backup.')
       }
 
+      recordBackupSuccess({
+        method: 'google',
+        completedAt: result.exportedAt,
+        totalRows: result.totalRows,
+      })
+
       toast({
         title: 'Google backup complete',
         description: `Synced ${result.totalRows ?? 0} Supabase rows to Google Sheets.`,
@@ -127,6 +139,7 @@ export default function SettingsPage() {
         window.open(result.spreadsheetUrl, '_blank', 'noopener,noreferrer')
       }
     } catch (error) {
+      recordBackupFailure('google', error)
       toast({
         title: 'Google backup failed',
         description: error instanceof Error ? error.message : 'Could not create Google backup.',
@@ -295,6 +308,8 @@ export default function SettingsPage() {
           </Card>
 
           {/* Data Management */}
+          <BackupSafetyAlert showHealthy />
+
           <Card className="bg-card border-border">
             <CardHeader>
               <div className="flex items-center gap-2">
