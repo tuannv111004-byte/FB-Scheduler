@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -72,7 +72,7 @@ function hexToRgba(hex: string, alpha: number) {
 }
 
 export function ScheduleBoard() {
-  const { pages, posts, selectedDate, setSelectedDate, markAsPosted } = useAppStore()
+  const { pages, posts, selectedDate, setSelectedDate, markAsPosted, updatePost } = useAppStore()
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>(() => {
     const savedValue = readScheduleSettings().selectedPageIds
     return Array.isArray(savedValue) ? savedValue.filter((id) => typeof id === 'string') : []
@@ -107,9 +107,17 @@ export function ScheduleBoard() {
     const savedValue = readScheduleSettings().pageGroupIndex
     return typeof savedValue === 'number' ? Math.max(0, Math.floor(savedValue)) : 0
   })
+  const [draggedPostId, setDraggedPostId] = useState<string | null>(null)
+  const [postDropTarget, setPostDropTarget] = useState<{ pageId: string; timeSlot: string } | null>(null)
+  const [dateArrowDropTarget, setDateArrowDropTarget] = useState<'prev' | 'next' | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [defaultSlot, setDefaultSlot] = useState<{ pageId: string; timeSlot: string } | null>(null)
+  const scheduleScrollRef = useRef<HTMLDivElement | null>(null)
+  const autoScrollFrameRef = useRef<number | null>(null)
+  const dateArrowHoldTimeoutRef = useRef<number | null>(null)
+  const dateArrowHoldTargetRef = useRef<'prev' | 'next' | null>(null)
+  const suppressPostClickRef = useRef(false)
 
   const activePages = pages.filter((p) => p.isActive)
   const activePageOrder = useMemo(() => {
@@ -152,6 +160,12 @@ export function ScheduleBoard() {
     return timeSlot === '04:00'
       ? format(addDays(new Date(selectedDate), 1), 'yyyy-MM-dd')
       : selectedDate
+  }
+
+  const getPostDateForScheduleDate = (scheduleDate: string, timeSlot: string) => {
+    return timeSlot === '04:00'
+      ? format(addDays(new Date(scheduleDate), 1), 'yyyy-MM-dd')
+      : scheduleDate
   }
 
   const getPostForSlot = (pageId: string, timeSlot: string) => {
@@ -223,10 +237,204 @@ export function ScheduleBoard() {
   const handlePageDragOver = (event: React.DragEvent<HTMLDivElement>, targetPageId: string) => {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
+    handleDragAutoScroll(event)
 
     if (draggedPageId && draggedPageId !== targetPageId) {
       movePage(draggedPageId, targetPageId)
     }
+  }
+
+  const stopDragAutoScroll = () => {
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current)
+      autoScrollFrameRef.current = null
+    }
+  }
+
+  const stopDateArrowHold = () => {
+    if (dateArrowHoldTimeoutRef.current !== null) {
+      window.clearTimeout(dateArrowHoldTimeoutRef.current)
+      dateArrowHoldTimeoutRef.current = null
+    }
+    dateArrowHoldTargetRef.current = null
+  }
+
+  const handleDragAutoScroll = (event: React.DragEvent<HTMLElement>) => {
+    if (!draggedPageId && !draggedPostId) return
+
+    const scrollContainer = scheduleScrollRef.current
+    if (!scrollContainer) return
+
+    const edgeSize = 72
+    const maxStep = 18
+    const containerRect = scrollContainer.getBoundingClientRect()
+    const viewportHeight = window.innerHeight
+
+    const leftDistance = event.clientX - containerRect.left
+    const rightDistance = containerRect.right - event.clientX
+    const topDistance = event.clientY
+    const bottomDistance = viewportHeight - event.clientY
+
+    const horizontalStep =
+      leftDistance < edgeSize
+        ? -Math.ceil(((edgeSize - leftDistance) / edgeSize) * maxStep)
+        : rightDistance < edgeSize
+          ? Math.ceil(((edgeSize - rightDistance) / edgeSize) * maxStep)
+          : 0
+
+    const verticalStep =
+      topDistance < edgeSize
+        ? -Math.ceil(((edgeSize - topDistance) / edgeSize) * maxStep)
+        : bottomDistance < edgeSize
+          ? Math.ceil(((edgeSize - bottomDistance) / edgeSize) * maxStep)
+          : 0
+
+    stopDragAutoScroll()
+
+    if (horizontalStep === 0 && verticalStep === 0) return
+
+    autoScrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollContainer.scrollLeft += horizontalStep
+      if (verticalStep !== 0) {
+        window.scrollBy({ top: verticalStep, left: 0 })
+      }
+      autoScrollFrameRef.current = null
+    })
+  }
+
+  const handlePostDragOver = (
+    event: React.DragEvent<HTMLDivElement>,
+    pageId: string,
+    timeSlot: string
+  ) => {
+    if (!draggedPostId) return
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    handleDragAutoScroll(event)
+    setPostDropTarget({ pageId, timeSlot })
+  }
+
+  const movePostToSlot = async (postId: string, pageId: string, timeSlot: string) => {
+    const draggedPost = posts.find((item) => item.id === postId)
+    if (!draggedPost) return
+
+    const postDate = getSlotDate(timeSlot)
+    const isSameSlot =
+      draggedPost.pageId === pageId &&
+      draggedPost.postDate === postDate &&
+      draggedPost.timeSlot === timeSlot
+
+    if (isSameSlot) return
+
+    const targetPost = posts.find(
+      (item) =>
+        item.id !== draggedPost.id &&
+        item.pageId === pageId &&
+        item.postDate === postDate &&
+        item.timeSlot === timeSlot
+    )
+
+    await updatePost(draggedPost.id, { pageId, postDate, timeSlot })
+
+    if (targetPost) {
+      await updatePost(targetPost.id, {
+        pageId: draggedPost.pageId,
+        postDate: draggedPost.postDate,
+        timeSlot: draggedPost.timeSlot,
+      })
+    }
+  }
+
+  const movePostToScheduleDate = async (postId: string, scheduleDate: string) => {
+    const draggedPost = posts.find((item) => item.id === postId)
+    if (!draggedPost) return
+
+    const postDate = getPostDateForScheduleDate(scheduleDate, draggedPost.timeSlot)
+    if (draggedPost.postDate === postDate) return
+
+    const targetPost = posts.find(
+      (item) =>
+        item.id !== draggedPost.id &&
+        item.pageId === draggedPost.pageId &&
+        item.postDate === postDate &&
+        item.timeSlot === draggedPost.timeSlot
+    )
+
+    await updatePost(draggedPost.id, { postDate })
+
+    if (targetPost) {
+      await updatePost(targetPost.id, { postDate: draggedPost.postDate })
+    }
+  }
+
+  const handlePostDrop = async (
+    event: React.DragEvent<HTMLDivElement>,
+    pageId: string,
+    timeSlot: string
+  ) => {
+    event.preventDefault()
+
+    const postId = draggedPostId || event.dataTransfer.getData('application/postops-post-id')
+    setDraggedPostId(null)
+    setPostDropTarget(null)
+    setDateArrowDropTarget(null)
+    stopDragAutoScroll()
+    stopDateArrowHold()
+
+    if (!postId) return
+    await movePostToSlot(postId, pageId, timeSlot)
+  }
+
+  const handleDateArrowDragOver = (
+    event: React.DragEvent<HTMLButtonElement>,
+    target: 'prev' | 'next'
+  ) => {
+    if (!draggedPostId) return
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDateArrowDropTarget(target)
+
+    if (dateArrowHoldTargetRef.current === target && dateArrowHoldTimeoutRef.current !== null) {
+      return
+    }
+
+    stopDateArrowHold()
+    dateArrowHoldTargetRef.current = target
+    dateArrowHoldTimeoutRef.current = window.setTimeout(() => {
+      setSelectedDate(
+        format(
+          target === 'prev' ? subDays(new Date(selectedDate), 1) : addDays(new Date(selectedDate), 1),
+          'yyyy-MM-dd'
+        )
+      )
+      setPostDropTarget(null)
+      setDateArrowDropTarget(null)
+      stopDateArrowHold()
+    }, 550)
+  }
+
+  const handleDateArrowDrop = async (
+    event: React.DragEvent<HTMLButtonElement>,
+    target: 'prev' | 'next'
+  ) => {
+    event.preventDefault()
+
+    const postId = draggedPostId || event.dataTransfer.getData('application/postops-post-id')
+    setDraggedPostId(null)
+    setPostDropTarget(null)
+    setDateArrowDropTarget(null)
+    stopDragAutoScroll()
+    stopDateArrowHold()
+
+    if (!postId) return
+
+    const targetDate = format(
+      target === 'prev' ? subDays(new Date(selectedDate), 1) : addDays(new Date(selectedDate), 1),
+      'yyyy-MM-dd'
+    )
+    await movePostToScheduleDate(postId, targetDate)
   }
 
   const getZebraBackground = (pageIndex: number) => {
@@ -294,6 +502,13 @@ export function ScheduleBoard() {
   }, [pageGroupCount])
 
   useEffect(() => {
+    return () => {
+      stopDragAutoScroll()
+      stopDateArrowHold()
+    }
+  }, [])
+
+  useEffect(() => {
     window.localStorage.setItem(
       scheduleSettingsStorageKey,
       JSON.stringify({
@@ -324,7 +539,25 @@ export function ScheduleBoard() {
         <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-4">
           <CardTitle className="text-lg font-semibold">Daily Schedule</CardTitle>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="outline" size="icon" onClick={handlePrevDay}>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handlePrevDay}
+              onDragOver={(event) => handleDateArrowDragOver(event, 'prev')}
+              onDragEnter={(event) => handleDateArrowDragOver(event, 'prev')}
+              onDragLeave={() => {
+                if (dateArrowDropTarget === 'prev') setDateArrowDropTarget(null)
+                stopDateArrowHold()
+              }}
+              onDrop={(event) => {
+                void handleDateArrowDrop(event, 'prev')
+              }}
+              className={cn(
+                draggedPostId && 'transition-[background-color,box-shadow,transform]',
+                dateArrowDropTarget === 'prev' && 'scale-105 bg-primary/10 shadow-[inset_0_0_0_2px_hsl(var(--primary)/0.55)]'
+              )}
+              title={draggedPostId ? 'Drop post to move to previous day' : 'Previous day'}
+            >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <div className="flex items-center gap-2">
@@ -339,7 +572,25 @@ export function ScheduleBoard() {
                 Today
               </Button>
             </div>
-            <Button variant="outline" size="icon" onClick={handleNextDay}>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleNextDay}
+              onDragOver={(event) => handleDateArrowDragOver(event, 'next')}
+              onDragEnter={(event) => handleDateArrowDragOver(event, 'next')}
+              onDragLeave={() => {
+                if (dateArrowDropTarget === 'next') setDateArrowDropTarget(null)
+                stopDateArrowHold()
+              }}
+              onDrop={(event) => {
+                void handleDateArrowDrop(event, 'next')
+              }}
+              className={cn(
+                draggedPostId && 'transition-[background-color,box-shadow,transform]',
+                dateArrowDropTarget === 'next' && 'scale-105 bg-primary/10 shadow-[inset_0_0_0_2px_hsl(var(--primary)/0.55)]'
+              )}
+              title={draggedPostId ? 'Drop post to move to next day' : 'Next day'}
+            >
               <ChevronRight className="h-4 w-4" />
             </Button>
             <DropdownMenu>
@@ -453,7 +704,11 @@ export function ScheduleBoard() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto rounded-lg border border-border">
+          <div
+            ref={scheduleScrollRef}
+            onDragOver={handleDragAutoScroll}
+            className="overflow-x-auto rounded-lg border border-border"
+          >
             <div className="w-max min-w-full border-r border-border">
               {/* Header Row - Page Names */}
               <div className="sticky top-0 z-20 flex border-b-2 border-border bg-card shadow-sm">
@@ -479,8 +734,12 @@ export function ScheduleBoard() {
                     onDrop={(event) => {
                       event.preventDefault()
                       setDraggedPageId(null)
+                      stopDragAutoScroll()
                     }}
-                    onDragEnd={() => setDraggedPageId(null)}
+                    onDragEnd={() => {
+                      setDraggedPageId(null)
+                      stopDragAutoScroll()
+                    }}
                     className={cn(
                       'w-44 shrink-0 cursor-grab border-l border-border p-2.5 text-sm font-semibold text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))] transition-[background-color,box-shadow,transform] duration-300 ease-out active:cursor-grabbing',
                       draggedPageId === page.id && 'relative z-10 -translate-y-0.5 scale-[1.015] bg-accent/40 shadow-lg ring-1 ring-primary/40'
@@ -535,6 +794,8 @@ export function ScheduleBoard() {
                       const hasSlot = page.timeSlots.includes(timeSlot)
                       const post = hasSlot ? getPostForSlot(page.id, timeSlot) : null
                       const cellBackground = getZebraBackground(pageIndex)
+                      const isPostDropTarget =
+                        postDropTarget?.pageId === page.id && postDropTarget.timeSlot === timeSlot
 
                       if (!hasSlot) {
                         return (
@@ -557,23 +818,55 @@ export function ScheduleBoard() {
                         <div
                           key={page.id}
                           style={{ backgroundColor: cellBackground }}
+                          onDragOver={(event) => handlePostDragOver(event, page.id, timeSlot)}
+                          onDragEnter={(event) => handlePostDragOver(event, page.id, timeSlot)}
+                          onDragLeave={() => {
+                            if (isPostDropTarget) setPostDropTarget(null)
+                          }}
+                          onDrop={(event) => {
+                            void handlePostDrop(event, page.id, timeSlot)
+                          }}
                           className={cn(
                             'w-44 shrink-0 border-l border-border p-2 transition-[background-color,box-shadow,transform] duration-300 ease-out',
-                            draggedPageId === page.id && 'relative z-10 scale-[1.01] bg-accent/20 shadow-md ring-1 ring-primary/20'
+                            draggedPageId === page.id && 'relative z-10 scale-[1.01] bg-accent/20 shadow-md ring-1 ring-primary/20',
+                            isPostDropTarget && 'bg-primary/10 shadow-[inset_0_0_0_2px_hsl(var(--primary)/0.55)]'
                           )}
                         >
                           {post ? (
                             <div
+                              draggable
                               className={cn(
-                                'rounded-lg border bg-card p-2.5 cursor-pointer shadow-xs transition-colors hover:bg-accent/50',
+                                'rounded-lg border bg-card p-2.5 cursor-grab shadow-xs transition-[background-color,box-shadow,transform,opacity] hover:bg-accent/50 active:cursor-grabbing',
                                 post.status === 'posted' && 'border-green-500/40 shadow-green-500/10',
                                 post.status === 'late' && 'border-red-500/40 shadow-red-500/10',
                                 post.status === 'due_now' && 'border-amber-500/40 shadow-amber-500/10',
                                 post.status === 'scheduled' && 'border-blue-500/40 shadow-blue-500/10',
                                 post.status === 'ready' && 'border-yellow-500/40 shadow-yellow-500/10',
-                                post.status === 'draft' && 'border-border bg-secondary'
+                                post.status === 'draft' && 'border-border bg-secondary',
+                                draggedPostId === post.id && 'scale-[0.98] opacity-60 ring-2 ring-primary/40'
                               )}
-                              onClick={() => handleEditPost(post)}
+                              onDragStart={(event) => {
+                                suppressPostClickRef.current = true
+                                setDraggedPostId(post.id)
+                                event.dataTransfer.effectAllowed = 'move'
+                                event.dataTransfer.setData('application/postops-post-id', post.id)
+                                event.dataTransfer.setData('text/plain', post.id)
+                              }}
+                              onDragEnd={() => {
+                                setDraggedPostId(null)
+                                setPostDropTarget(null)
+                                setDateArrowDropTarget(null)
+                                stopDragAutoScroll()
+                                stopDateArrowHold()
+                                window.setTimeout(() => {
+                                  suppressPostClickRef.current = false
+                                }, 0)
+                              }}
+                              onClick={() => {
+                                if (suppressPostClickRef.current) return
+                                handleEditPost(post)
+                              }}
+                              title="Drag to move this post"
                             >
                               <div className="flex items-start gap-2">
                                 {post.imageUrl ? (
@@ -602,6 +895,7 @@ export function ScheduleBoard() {
                                     className="h-6 w-6 text-green-400 hover:text-green-300 hover:bg-green-500/10"
                                     onClick={(e) => {
                                       e.stopPropagation()
+                                      suppressPostClickRef.current = false
                                       markAsPosted(post.id)
                                     }}
                                   >

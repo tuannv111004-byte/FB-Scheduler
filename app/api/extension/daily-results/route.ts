@@ -24,6 +24,15 @@ type ImportRequest = {
   items?: unknown
 }
 
+class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 type PageRow = {
   id: string
   name?: string
@@ -65,6 +74,17 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
       ...(init?.headers ?? {}),
     },
   })
+}
+
+function errorResponse(error: unknown, fallbackMessage: string) {
+  const message = error instanceof Error ? error.message : fallbackMessage
+  const status = error instanceof ApiError ? error.status : 500
+
+  if (status >= 500) {
+    console.error('[daily-results]', error)
+  }
+
+  return jsonResponse({ error: message }, { status })
 }
 
 function readString(value: unknown) {
@@ -229,23 +249,26 @@ function normalizeItems(value: unknown) {
     }
 
     const item = rawItem as DailyResultItem
-    const itemStatus = readString(item.status)
-    if (itemStatus && itemStatus !== 'done') return
+    const itemStatus = readString(item.status).toLowerCase()
+    if (itemStatus && !['done', 'success', 'completed'].includes(itemStatus)) return
+
+    const dailyLink = readString(item.dailyLink)
+    const shortLink = readString(item.shortLink) || dailyLink
 
     const normalizedItem = {
       title: readString(item.title),
       image: readString(item.image),
       caption: readString(item.caption),
       schedulerPostId: readString(item.schedulerPostId),
-      dailyLink: readString(item.dailyLink),
-      shortLink: readString(item.shortLink),
+      dailyLink,
+      shortLink,
       domain: readString(item.domain),
       cleanupImageUrls: readStringArray(item.cleanupImageUrls),
     }
 
     if (!normalizedItem.title) errors.push(`Item ${index + 1}: title is required.`)
     if (!normalizedItem.image) errors.push(`Item ${index + 1}: image is required.`)
-    if (!normalizedItem.shortLink) errors.push(`Item ${index + 1}: shortLink is required.`)
+    if (!normalizedItem.shortLink) errors.push(`Item ${index + 1}: shortLink or dailyLink is required.`)
 
     if (normalizedItem.title && normalizedItem.image && normalizedItem.shortLink) {
       items.push(normalizedItem)
@@ -253,11 +276,11 @@ function normalizeItems(value: unknown) {
   })
 
   if (errors.length > 0 && items.length === 0) {
-    throw new Error(errors.slice(0, 10).join('\n'))
+    throw new ApiError(errors.slice(0, 10).join('\n'), 400)
   }
 
   if (items.length === 0) {
-    throw new Error('No completed Daily Feji results were provided.')
+    throw new ApiError('No completed Daily Feji results were provided.', 400)
   }
 
   return { items, errors }
@@ -266,7 +289,7 @@ function normalizeItems(value: unknown) {
 function requireImportToken(request: Request) {
   const configuredToken = process.env.EXTENSION_IMPORT_TOKEN
   if (!configuredToken) {
-    throw new Error('EXTENSION_IMPORT_TOKEN is not configured on the scheduler app.')
+    throw new ApiError('EXTENSION_IMPORT_TOKEN is not configured on the scheduler app.', 503)
   }
 
   const header = request.headers.get('authorization') ?? ''
@@ -284,7 +307,7 @@ function createServerSupabaseClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
   if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Supabase environment variables are missing.')
+    throw new ApiError('Supabase environment variables are missing.', 503)
   }
 
   return createClient(supabaseUrl, supabaseKey, {
@@ -333,12 +356,7 @@ export async function GET(request: Request) {
 
     return jsonResponse({ pages })
   } catch (error) {
-    return jsonResponse(
-      {
-        error: error instanceof Error ? error.message : 'Failed to load Scheduler pages.',
-      },
-      { status: 500 }
-    )
+    return errorResponse(error, 'Failed to load Scheduler pages.')
   }
 }
 
@@ -348,7 +366,12 @@ export async function POST(request: Request) {
       return jsonResponse({ error: 'Unauthorized.' }, { status: 401 })
     }
 
-    const payload = (await request.json()) as ImportRequest
+    let payload: ImportRequest
+    try {
+      payload = (await request.json()) as ImportRequest
+    } catch {
+      throw new ApiError('Request body must be valid JSON.', 400)
+    }
     const pageId = readString(payload.pageId)
     const startDate = readString(payload.startDate)
     const startTimeSlot = readString(payload.startTimeSlot)
@@ -532,11 +555,6 @@ export async function POST(request: Request) {
       errors: importErrors,
     })
   } catch (error) {
-    return jsonResponse(
-      {
-        error: error instanceof Error ? error.message : 'Failed to import Daily Feji results.',
-      },
-      { status: 500 }
-    )
+    return errorResponse(error, 'Failed to import Daily Feji results.')
   }
 }
