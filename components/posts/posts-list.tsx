@@ -64,6 +64,7 @@ const targetImageHeight = 1350
 const targetImageRatio = targetImageWidth / targetImageHeight
 const postsPreferencesStorageKey = 'postops:posts-preferences'
 const autoHighlightRefreshMs = 60 * 1000
+const nextDaySlotBoundaryMinutes = 6 * 60
 
 type HighlightMode = 'auto' | 'manual' | 'off'
 type TimeHighlightState = 'manual-upcoming' | 'manual-recent' | 'due' | 'upcoming' | 'recent' | 'next'
@@ -204,7 +205,12 @@ function createScheduledDate(post: Post) {
 }
 
 function getDisplayDateForTimeSlot(selectedDate: string, timeSlot: string) {
-  return timeSlot === '04:00' ? addOneDay(selectedDate) : selectedDate
+  return isNextDayTimeSlot(timeSlot) ? addOneDay(selectedDate) : selectedDate
+}
+
+function isNextDayTimeSlot(timeSlot: string) {
+  const minutes = parseTimeSlotMinutes(timeSlot)
+  return minutes !== null && minutes < nextDaySlotBoundaryMinutes
 }
 
 function comparePostsBySchedule(first: Post, second: Post) {
@@ -960,7 +966,7 @@ export function PostsList() {
                           title={isTimeHighlighted ? getHighlightTitle(timeHighlightState) : undefined}
                         >
                           {post.timeSlot}
-                          {post.timeSlot === '04:00' && post.postDate === addOneDay(selectedDate)
+                          {isNextDayTimeSlot(post.timeSlot) && post.postDate === addOneDay(selectedDate)
                             ? ' (+1d)'
                             : ''}
                         </Badge>

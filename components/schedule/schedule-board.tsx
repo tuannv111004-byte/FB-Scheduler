@@ -29,7 +29,8 @@ import { format, addDays, subDays } from 'date-fns'
 import type { Post } from '@/lib/types'
 
 const scheduleSettingsStorageKey = 'postops:schedule-settings'
-const defaultScheduleSlots = ['08:00', '15:00', '20:00', '22:00', '04:00'] as const
+const defaultScheduleSlots = ['08:00', '15:00', '20:00', '23:00', '02:00'] as const
+const nextDaySlotBoundaryMinutes = 6 * 60
 
 type ScheduleSettings = {
   selectedPageIds?: string[]
@@ -69,6 +70,36 @@ function hexToRgba(hex: string, alpha: number) {
   const blue = parseInt(normalizedHex.slice(4, 6), 16)
 
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+}
+
+function parseTimeSlotMinutes(timeSlot: string) {
+  const match = timeSlot.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return hours * 60 + minutes
+}
+
+function isNextDaySlot(timeSlot: string) {
+  const minutes = parseTimeSlotMinutes(timeSlot)
+  return minutes !== null && minutes < nextDaySlotBoundaryMinutes
+}
+
+function compareBoardTimeSlots(first: string, second: string) {
+  const firstMinutes = parseTimeSlotMinutes(first)
+  const secondMinutes = parseTimeSlotMinutes(second)
+  const firstIsNextDay = isNextDaySlot(first)
+  const secondIsNextDay = isNextDaySlot(second)
+
+  if (firstIsNextDay !== secondIsNextDay) return firstIsNextDay ? 1 : -1
+  if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+    return firstMinutes - secondMinutes
+  }
+
+  return first.localeCompare(second)
 }
 
 export function ScheduleBoard() {
@@ -150,20 +181,27 @@ export function ScheduleBoard() {
       ? 'Pages 0 of 0'
       : `Pages ${visiblePageStart + 1}-${visiblePageEnd} of ${filteredPages.length}`
 
-  const allTimeSlots = defaultScheduleSlots
+  const allTimeSlots = useMemo(() => {
+    const slots = new Set<string>(defaultScheduleSlots)
+    filteredPages.forEach((page) => {
+      page.timeSlots.forEach((slot) => slots.add(slot))
+    })
+
+    return [...slots].sort(compareBoardTimeSlots)
+  }, [filteredPages])
 
   const now = new Date()
   const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
   const isToday = selectedDate === format(now, 'yyyy-MM-dd')
 
   const getSlotDate = (timeSlot: string) => {
-    return timeSlot === '04:00'
+    return isNextDaySlot(timeSlot)
       ? format(addDays(new Date(selectedDate), 1), 'yyyy-MM-dd')
       : selectedDate
   }
 
   const getPostDateForScheduleDate = (scheduleDate: string, timeSlot: string) => {
-    return timeSlot === '04:00'
+    return isNextDaySlot(timeSlot)
       ? format(addDays(new Date(scheduleDate), 1), 'yyyy-MM-dd')
       : scheduleDate
   }
@@ -466,7 +504,7 @@ export function ScheduleBoard() {
   }
 
   const isSlotPast = (timeSlot: string) => {
-    if (timeSlot === '04:00') return false
+    if (isNextDaySlot(timeSlot)) return false
     return isToday && timeSlot < currentTime
   }
 
@@ -786,7 +824,7 @@ export function ScheduleBoard() {
                         isPast ? 'text-muted-foreground' : 'text-foreground'
                       )}
                     >
-                      {timeSlot === '04:00' ? '04:00 (+1d)' : timeSlot}
+                      {isNextDaySlot(timeSlot) ? `${timeSlot} (+1d)` : timeSlot}
                     </div>
 
                     {/* Page Columns */}

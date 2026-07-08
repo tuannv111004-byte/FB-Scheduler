@@ -18,6 +18,38 @@ import { useAppStore } from '@/lib/store'
 import type { FacebookPage } from '@/lib/types'
 
 const defaultBrandColor = '#14b8a6'
+const defaultTimeSlots = ['08:00', '15:00', '20:00', '23:00', '02:00']
+const nextDaySlotBoundaryMinutes = 6 * 60
+
+function parseTimeSlotMinutes(timeSlot: string) {
+  const match = timeSlot.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return hours * 60 + minutes
+}
+
+function isNextDaySlot(timeSlot: string) {
+  const minutes = parseTimeSlotMinutes(timeSlot)
+  return minutes !== null && minutes < nextDaySlotBoundaryMinutes
+}
+
+function compareTimeSlots(first: string, second: string) {
+  const firstMinutes = parseTimeSlotMinutes(first)
+  const secondMinutes = parseTimeSlotMinutes(second)
+  const firstIsNextDay = isNextDaySlot(first)
+  const secondIsNextDay = isNextDaySlot(second)
+
+  if (firstIsNextDay !== secondIsNextDay) return firstIsNextDay ? 1 : -1
+  if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+    return firstMinutes - secondMinutes
+  }
+
+  return first.localeCompare(second)
+}
 
 async function detectColorFromImage(imageUrl: string) {
   return new Promise<string>((resolve, reject) => {
@@ -164,7 +196,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     brandColor: defaultBrandColor,
     isActive: true,
     postsPerDay: 5,
-    timeSlots: ['04:00', '08:00', '15:00', '20:00', '22:00'],
+    timeSlots: defaultTimeSlots,
     notes: '',
   })
 
@@ -190,7 +222,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
         brandColor: defaultBrandColor,
         isActive: true,
         postsPerDay: 5,
-        timeSlots: ['04:00', '08:00', '15:00', '20:00', '22:00'],
+        timeSlots: defaultTimeSlots,
         notes: '',
       })
     }
@@ -229,7 +261,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     if (newTimeSlot && !formData.timeSlots.includes(newTimeSlot)) {
       setFormData((prev) => ({
         ...prev,
-        timeSlots: [...prev.timeSlots, newTimeSlot].sort(),
+        timeSlots: [...prev.timeSlots, newTimeSlot].sort(compareTimeSlots),
       }))
       setNewTimeSlot('')
     }
