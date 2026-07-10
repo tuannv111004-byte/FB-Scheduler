@@ -1171,7 +1171,7 @@ export async function uploadPostImage(file: File) {
   const uploadFile = await normalizeImageForUpload(file)
 
   if (isCloudinaryConfigured) {
-    return uploadPostImageToCloudinary(uploadFile)
+    return uploadImageToCloudinary(uploadFile, cloudinaryFolder)
   }
 
   const client = requireSupabase()
@@ -1197,11 +1197,41 @@ export async function uploadPostImage(file: File) {
   }
 }
 
-async function uploadPostImageToCloudinary(file: File) {
+export async function uploadPageLogoImage(file: File) {
+  const uploadFile = await normalizeImageForUpload(file)
+
+  if (isCloudinaryConfigured) {
+    return uploadImageToCloudinary(uploadFile, `${cloudinaryFolder}/pages`)
+  }
+
+  const client = requireSupabase()
+  const fileExtension = uploadFile.name.split('.').pop() || 'jpg'
+  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExtension}`
+  const filePath = `pages/${fileName}`
+
+  const { error: uploadError } = await client.storage
+    .from('post-images')
+    .upload(filePath, uploadFile, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: uploadFile.type,
+    })
+
+  if (uploadError) throw uploadError
+
+  const { data } = client.storage.from('post-images').getPublicUrl(filePath)
+
+  return {
+    imagePath: filePath,
+    imageUrl: data.publicUrl,
+  }
+}
+
+async function uploadImageToCloudinary(file: File, folder: string) {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('upload_preset', cloudinaryUploadPreset!)
-  formData.append('folder', cloudinaryFolder)
+  formData.append('folder', folder)
 
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`, {
     method: 'POST',

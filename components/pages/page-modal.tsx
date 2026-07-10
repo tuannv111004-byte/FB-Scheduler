@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { X, Plus } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
+import { uploadPageLogoImage } from '@/lib/supabase'
 import type { FacebookPage } from '@/lib/types'
 
 const defaultBrandColor = '#14b8a6'
@@ -49,6 +50,17 @@ function compareTimeSlots(first: string, second: string) {
   }
 
   return first.localeCompare(second)
+}
+
+function extractImageFileFromClipboard(event: React.ClipboardEvent) {
+  for (const item of Array.from(event.clipboardData.items)) {
+    if (!item.type.startsWith('image/')) continue
+
+    const file = item.getAsFile()
+    if (file) return file
+  }
+
+  return null
 }
 
 async function detectColorFromImage(imageUrl: string) {
@@ -188,6 +200,8 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
   const [errorMessage, setErrorMessage] = useState('')
   const [isDetectingColor, setIsDetectingColor] = useState(false)
   const [lastDetectedLogoUrl, setLastDetectedLogoUrl] = useState('')
+  const [selectedLogoFile, setSelectedLogoFile] = useState<File | null>(null)
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState('')
 
   const [formData, setFormData] = useState({
     name: '',
@@ -230,12 +244,28 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     setErrorMessage('')
     setIsDetectingColor(false)
     setLastDetectedLogoUrl('')
+    setSelectedLogoFile(null)
+    setLogoPreviewUrl('')
   }, [page, open])
+
+  useEffect(() => {
+    if (!selectedLogoFile) {
+      setLogoPreviewUrl('')
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(selectedLogoFile)
+    setLogoPreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedLogoFile])
 
   useEffect(() => {
     if (!open) return
 
-    const normalizedLogoUrl = formData.logoUrl.trim()
+    const normalizedLogoUrl = (logoPreviewUrl || formData.logoUrl).trim()
     if (!normalizedLogoUrl) return
     if (normalizedLogoUrl === lastDetectedLogoUrl) return
 
@@ -255,7 +285,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [formData.logoUrl, lastDetectedLogoUrl, open])
+  }, [formData.logoUrl, lastDetectedLogoUrl, logoPreviewUrl, open])
 
   const handleAddTimeSlot = () => {
     if (newTimeSlot && !formData.timeSlots.includes(newTimeSlot)) {
@@ -274,6 +304,15 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     }))
   }
 
+  const handleLogoPaste = (event: React.ClipboardEvent) => {
+    const imageFile = extractImageFileFromClipboard(event)
+    if (!imageFile) return
+
+    event.preventDefault()
+    setLastDetectedLogoUrl('')
+    setSelectedLogoFile(imageFile)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -281,10 +320,19 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     setErrorMessage('')
 
     try {
+      let nextFormData = formData
+      if (selectedLogoFile) {
+        const uploadedLogo = await uploadPageLogoImage(selectedLogoFile)
+        nextFormData = {
+          ...formData,
+          logoUrl: uploadedLogo.imageUrl,
+        }
+      }
+
       if (isEditing && page) {
-        await updatePage(page.id, formData)
+        await updatePage(page.id, nextFormData)
       } else {
-        await addPage(formData)
+        await addPage(nextFormData)
       }
       onOpenChange(false)
     } catch (error) {
@@ -323,23 +371,40 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto]" onPaste={handleLogoPaste}>
             <div className="space-y-2">
-              <Label htmlFor="logoUrl">Page Logo URL</Label>
+              <Label htmlFor="logoFile">Page Logo Image</Label>
               <Input
-                id="logoUrl"
-                value={formData.logoUrl}
-                onChange={(e) => {
-                  const value = e.target.value
+                id="logoFile"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null
                   setLastDetectedLogoUrl('')
-                  setFormData((prev) => ({ ...prev, logoUrl: value }))
+                  setSelectedLogoFile(file)
                 }}
-                placeholder="https://example.com/logo.png"
               />
+              {selectedLogoFile && (
+                <p className="text-xs text-muted-foreground">{selectedLogoFile.name}</p>
+              )}
+              {(formData.logoUrl || selectedLogoFile) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedLogoFile(null)
+                    setLastDetectedLogoUrl('')
+                    setFormData((prev) => ({ ...prev, logoUrl: '' }))
+                  }}
+                >
+                  Remove Logo
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">
                 {isDetectingColor
                   ? 'Detecting page color from logo...'
-                  : 'Brand color will auto-adjust from the logo when possible.'}
+                  : 'Choose an image file or paste an image here. It will upload to storage when saved.'}
               </p>
             </div>
             <div className="space-y-2">
@@ -366,9 +431,9 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
               Preview
             </p>
             <div className="flex items-center gap-3">
-              {formData.logoUrl ? (
+              {logoPreviewUrl || formData.logoUrl ? (
                 <img
-                  src={formData.logoUrl}
+                  src={logoPreviewUrl || formData.logoUrl}
                   alt=""
                   className="h-12 w-12 rounded-xl border border-border object-cover"
                 />
