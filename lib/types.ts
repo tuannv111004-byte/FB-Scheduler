@@ -15,6 +15,7 @@ export interface PageInput {
   isActive: boolean
   postsPerDay: number
   timeSlots: string[]
+  ctaTemplates: string[]
   notes: string
 }
 

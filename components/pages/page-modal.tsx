@@ -211,6 +211,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     isActive: true,
     postsPerDay: 5,
     timeSlots: defaultTimeSlots,
+    ctaTemplates: [],
     notes: '',
   })
 
@@ -226,6 +227,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
         isActive: page.isActive,
         postsPerDay: page.postsPerDay,
         timeSlots: [...page.timeSlots],
+        ctaTemplates: [...page.ctaTemplates],
         notes: page.notes,
       })
     } else {
@@ -237,6 +239,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
         isActive: true,
         postsPerDay: 5,
         timeSlots: defaultTimeSlots,
+        ctaTemplates: [],
         notes: '',
       })
     }

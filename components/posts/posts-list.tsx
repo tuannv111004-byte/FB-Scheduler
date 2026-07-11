@@ -56,7 +56,7 @@ import { PostModal } from './post-modal'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import type { Post, PostStatus } from '@/lib/types'
+import type { FacebookPage, Post, PostStatus } from '@/lib/types'
 
 const copyableImageType = 'image/png'
 const targetImageWidth = 1080
@@ -66,8 +66,48 @@ const postsPreferencesStorageKey = 'postops:posts-preferences'
 const autoHighlightRefreshMs = 60 * 1000
 const nextDaySlotBoundaryMinutes = 6 * 60
 
+const linkCtaTemplates = {
+  sports: [
+    'Read the full sports story here:',
+    'See why fans are talking:',
+    'Catch the full update here:',
+    'The full moment is here:',
+    'More on this game-day story:',
+    'Fans are reacting to this here:',
+    'See the full breakdown here:',
+    'The latest around this story is here:',
+    'Read what happened next:',
+    'Full details for fans here:',
+  ],
+  entertainment: [
+    'Read the full story here:',
+    'See why fans are talking:',
+    'More on this moment:',
+    'Catch the full story here:',
+    'The full details are here:',
+    'See what happened next:',
+  ],
+  drama: [
+    'If you are curious, the full story is here:',
+    'See what everyone is talking about:',
+    'The details are worth reading:',
+    'What happened next is here:',
+    'Read the full story here:',
+    'This moment has people curious:',
+  ],
+  light: [
+    'More details here:',
+    'You can read more here:',
+    'Full story here:',
+    'Here is the full update:',
+    'Read more here:',
+    'Click here to read more:',
+  ],
+} as const
+
 type HighlightMode = 'auto' | 'manual' | 'off'
 type TimeHighlightState = 'manual-upcoming' | 'manual-recent' | 'due' | 'upcoming' | 'recent' | 'next'
+type LinkCtaCategory = keyof typeof linkCtaTemplates
 
 type PostsPreferences = {
   selectedDate?: string
@@ -206,6 +246,51 @@ function createScheduledDate(post: Post) {
 
 function getDisplayDateForTimeSlot(selectedDate: string, timeSlot: string) {
   return isNextDayTimeSlot(timeSlot) ? addOneDay(selectedDate) : selectedDate
+}
+
+function pickLinkCtaCategory(text: string): LinkCtaCategory {
+  const normalized = text.toLowerCase()
+
+  if (/\b(caitlin|clark|paige|bueckers|angel|reese|nba|wnba|nfl|mlb|nhl|game|match|player|coach|team|fans|court|field|season|league|basketball|football|baseball|soccer)\b/.test(normalized)) {
+    return 'sports'
+  }
+
+  if (/\b(actor|actress|singer|movie|film|show|tv|celebrity|star|hollywood|performance|episode|concert|music)\b/.test(normalized)) {
+    return 'entertainment'
+  }
+
+  if (/\b(drama|rumor|secret|shocking|heated|chaos|controversy|reaction|responds|breaks silence|caught|fans erupt)\b/.test(normalized)) {
+    return 'drama'
+  }
+
+  return 'light'
+}
+
+function normalizeLinkCta(value: string) {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function expandLinkCtaTemplates(items: string[]) {
+  return items.flatMap((item) => {
+    const normalized = normalizeLinkCta(item)
+    if (!normalized) return []
+
+    const colonEndedPhrases = normalized.match(/[^:]+:/g)
+    if (colonEndedPhrases && colonEndedPhrases.length > 1) {
+      return colonEndedPhrases.map(normalizeLinkCta)
+    }
+
+    return [normalized]
+  })
+}
+
+function buildClickableLinkCopy(post: Post, page?: FacebookPage) {
+  const pageTemplates = expandLinkCtaTemplates(page?.ctaTemplates ?? [])
+  const templates = pageTemplates.length > 0
+    ? pageTemplates
+    : linkCtaTemplates[pickLinkCtaCategory([post.caption, post.notes, page?.name ?? ''].join(' '))]
+  const template = templates[Math.floor(Math.random() * templates.length)]
+  return `${template} ${post.adsLink}`
 }
 
 function isNextDayTimeSlot(timeSlot: string) {
@@ -993,10 +1078,13 @@ export function PostsList() {
                               type="button"
                               onClick={() => {
                                 setHighlightedPostId(post.id)
-                                void copyText(post.adsLink!, 'Ads link')
+                                void copyText(
+                                  buildClickableLinkCopy(post, getPageById(post.pageId)),
+                                  'Ads link'
+                                )
                               }}
                               className="text-xs text-primary hover:underline"
-                              title="Click to copy ads link"
+                              title="Click to copy ads link with CTA"
                             >
                               Copy Link
                             </button>

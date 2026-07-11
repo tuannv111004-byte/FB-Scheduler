@@ -9,6 +9,7 @@ create table if not exists pages (
   is_active boolean not null default true,
   posts_per_day integer not null default 1,
   time_slots text[] not null default '{}',
+  cta_templates text[] not null default '{}',
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -16,6 +17,7 @@ create table if not exists pages (
 
 alter table pages add column if not exists logo_url text;
 alter table pages add column if not exists brand_color text not null default '#14b8a6';
+alter table pages add column if not exists cta_templates text[] not null default '{}';
 
 create table if not exists posts (
   id uuid primary key default gen_random_uuid(),

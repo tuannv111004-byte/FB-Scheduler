@@ -68,6 +68,7 @@ type PageRow = {
   is_active: boolean
   posts_per_day: number
   time_slots: string[] | null
+  cta_templates: string[] | null
   notes: string | null
   created_at: string
   updated_at: string
@@ -214,6 +215,7 @@ function mapPageRow(row: PageRow): FacebookPage {
     isActive: row.is_active,
     postsPerDay: row.posts_per_day,
     timeSlots: row.time_slots ?? [],
+    ctaTemplates: row.cta_templates ?? [],
     notes: row.notes ?? '',
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -374,6 +376,7 @@ function pagePayload(input: PageInput) {
     is_active: input.isActive,
     posts_per_day: input.postsPerDay,
     time_slots: input.timeSlots,
+    cta_templates: input.ctaTemplates,
     notes: input.notes || null,
     updated_at: new Date().toISOString(),
   }
@@ -560,6 +563,7 @@ export async function updatePageRemote(id: string, updates: Partial<PageInput>) 
   if (updates.isActive !== undefined) payload.is_active = updates.isActive
   if (updates.postsPerDay !== undefined) payload.posts_per_day = updates.postsPerDay
   if (updates.timeSlots !== undefined) payload.time_slots = updates.timeSlots
+  if (updates.ctaTemplates !== undefined) payload.cta_templates = updates.ctaTemplates
   if (updates.notes !== undefined) payload.notes = updates.notes || null
 
   const { data, error } = await client

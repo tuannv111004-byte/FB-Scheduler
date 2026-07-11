@@ -1,13 +1,16 @@
 "use client"
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Sidebar } from '@/components/sidebar'
 import { Header } from '@/components/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +31,9 @@ import {
   Database,
   Download,
   Loader2,
+  Link2,
   Settings,
+  Trash2,
   Upload,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -42,6 +47,7 @@ import {
   type ImportSummary,
 } from '@/lib/data-transfer'
 import { isSupabaseConfigured } from '@/lib/supabase'
+import { useAppStore } from '@/lib/store'
 import { BackupSafetyAlert } from '@/components/backup/backup-safety-alert'
 import { recordBackupFailure, recordBackupSuccess } from '@/lib/backup-health'
 
@@ -61,6 +67,43 @@ function summarizeImport(summary: ImportSummary) {
     .map(([tableName, count]) => `${tableName}: ${count}`)
     .join(', ')
 }
+
+function normalizeCta(value: string) {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function parseCtaInput(value: string) {
+  const ctas = value
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return []
+
+      const colonEndedPhrases = trimmed.match(/[^:]+:/g)
+      if (colonEndedPhrases && colonEndedPhrases.length > 1) {
+        return colonEndedPhrases
+      }
+
+      return [trimmed]
+    })
+    .map(normalizeCta)
+    .filter(Boolean)
+
+  return Array.from(new Set(ctas))
+}
+
+const sportsCtaPreset = [
+  'Read the full sports story here:',
+  'See why fans are talking:',
+  'Catch the full update here:',
+  'The full moment is here:',
+  'More on this game-day story:',
+  'Fans are reacting to this here:',
+  'See the full breakdown here:',
+  'The latest around this story is here:',
+  'Read what happened next:',
+  'Full details for fans here:',
+]
 
 type GoogleBackupResponse = {
   ok: boolean
@@ -84,6 +127,8 @@ type GoogleRestoreResponse = {
 export default function SettingsPage() {
   const { resolvedTheme, setTheme } = useTheme()
   const { toast } = useToast()
+  const pages = useAppStore((state) => state.pages)
+  const updatePage = useAppStore((state) => state.updatePage)
   const [mounted, setMounted] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isGoogleBackingUp, setIsGoogleBackingUp] = useState(false)
@@ -92,6 +137,9 @@ export default function SettingsPage() {
   const [importMode, setImportMode] = useState<ImportMode>('merge')
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
   const [googleRestoreDialogOpen, setGoogleRestoreDialogOpen] = useState(false)
+  const [ctaInput, setCtaInput] = useState('')
+  const [ctaPageIds, setCtaPageIds] = useState<string[] | null>(null)
+  const [isSavingCta, setIsSavingCta] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -102,6 +150,114 @@ export default function SettingsPage() {
   const supabaseDataActionsDisabled = !isSupabaseConfigured || isExporting || isImporting || isGoogleRestoring
   const googleBackupDisabled = isGoogleBackingUp || isGoogleRestoring || isExporting || isImporting
   const googleRestoreDisabled = !isSupabaseConfigured || isGoogleRestoring || isGoogleBackingUp || isExporting || isImporting
+  const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
+  const selectedCtaPages = ctaPageIds ?? activePages.map((page) => page.id)
+
+  const toggleCtaPage = (pageId: string, checked: boolean) => {
+    setCtaPageIds((current) => {
+      const selected = current ?? activePages.map((page) => page.id)
+      if (checked) return selected.includes(pageId) ? selected : [...selected, pageId]
+      return selected.filter((id) => id !== pageId)
+    })
+  }
+
+  const handleAddCta = async () => {
+    const nextCtas = parseCtaInput(ctaInput)
+    if (nextCtas.length === 0) return
+    if (selectedCtaPages.length === 0) {
+      toast({
+        title: 'No pages selected',
+        description: 'Select at least one page before adding a CTA.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsSavingCta(true)
+    try {
+      await Promise.all(
+        pages
+          .filter((page) => selectedCtaPages.includes(page.id))
+          .map((page) => {
+            const existing = new Set(page.ctaTemplates.map(normalizeCta))
+            const newCtas = nextCtas.filter((cta) => !existing.has(cta))
+            if (newCtas.length === 0) return Promise.resolve()
+            return updatePage(page.id, { ctaTemplates: [...page.ctaTemplates, ...newCtas] })
+          })
+      )
+      setCtaInput('')
+      toast({
+        title: nextCtas.length === 1 ? 'CTA added' : 'CTAs added',
+        description: `Added ${nextCtas.length} CTA${nextCtas.length === 1 ? '' : 's'} to ${selectedCtaPages.length} page${selectedCtaPages.length === 1 ? '' : 's'}.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Failed to add CTA',
+        description: error instanceof Error ? error.message : 'Could not update page CTAs.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingCta(false)
+    }
+  }
+
+  const handleAddSportsCtaPack = async () => {
+    if (selectedCtaPages.length === 0) {
+      toast({
+        title: 'No pages selected',
+        description: 'Select at least one page before adding the sports CTA pack.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsSavingCta(true)
+    try {
+      await Promise.all(
+        pages
+          .filter((page) => selectedCtaPages.includes(page.id))
+          .map((page) => {
+            const existing = new Set(page.ctaTemplates.map(normalizeCta))
+            const newCtas = sportsCtaPreset.filter((cta) => !existing.has(normalizeCta(cta)))
+            if (newCtas.length === 0) return Promise.resolve()
+            return updatePage(page.id, { ctaTemplates: [...page.ctaTemplates, ...newCtas] })
+          })
+      )
+      toast({
+        title: 'Sports CTA pack added',
+        description: `Added WNBA/MLB-friendly CTAs to ${selectedCtaPages.length} page${selectedCtaPages.length === 1 ? '' : 's'}.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Failed to add sports CTA pack',
+        description: error instanceof Error ? error.message : 'Could not update page CTAs.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingCta(false)
+    }
+  }
+
+  const handleRemoveCta = async (pageId: string, cta: string) => {
+    const page = pages.find((item) => item.id === pageId)
+    if (!page) return
+
+    setIsSavingCta(true)
+    try {
+      await updatePage(pageId, {
+        ctaTemplates: page.ctaTemplates.filter((item) => item !== cta),
+      })
+      toast({ title: 'CTA removed' })
+    } catch (error) {
+      toast({
+        title: 'Failed to remove CTA',
+        description: error instanceof Error ? error.message : 'Could not update page CTAs.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingCta(false)
+    }
+  }
 
   const handleExportAll = async () => {
     setIsExporting(true)
@@ -357,6 +513,113 @@ export default function SettingsPage() {
                   disabled
                   className="w-64"
                 />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Link2 className="h-5 w-5 text-muted-foreground" />
+                <CardTitle className="text-lg">Page CTA Settings</CardTitle>
+              </div>
+              <CardDescription>Manage click phrases used when copying post links</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+                <div className="space-y-2">
+                  <Label htmlFor="page-cta-input">CTA phrase</Label>
+                  <Textarea
+                    id="page-cta-input"
+                    value={ctaInput}
+                    onChange={(event) => setCtaInput(event.target.value)}
+                    placeholder="Example: See why fans are talking:"
+                    className="min-h-24"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    When copying a link in Posts, the app chooses one CTA from that post's page.
+                  </p>
+                </div>
+                <div className="space-y-3 rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>Use for pages</Label>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setCtaPageIds(null)}>
+                      Active Pages
+                    </Button>
+                  </div>
+                  <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                    {pages.map((page) => (
+                      <label key={page.id} className="flex items-center gap-2 rounded-md border border-border/70 p-2 text-sm">
+                        <Checkbox
+                          checked={selectedCtaPages.includes(page.id)}
+                          onCheckedChange={(checked) => toggleCtaPage(page.id, checked === true)}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{page.name}</span>
+                        {!page.isActive && <Badge variant="secondary">Off</Badge>}
+                      </label>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => void handleAddCta()}
+                    disabled={isSavingCta || parseCtaInput(ctaInput).length === 0}
+                    className="w-full"
+                  >
+                    {isSavingCta ? 'Saving...' : 'Add CTA'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void handleAddSportsCtaPack()}
+                    disabled={isSavingCta}
+                    className="w-full"
+                  >
+                    Add Sports CTA Pack
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Good for Caitlin Clark, Paige Bueckers, Angel Reese, WNBA, and MLB pages.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {pages.map((page) => (
+                  <div key={page.id} className="rounded-md border border-border p-3">
+                    <div className="mb-3 flex items-center gap-2">
+                      {page.logoUrl ? (
+                        <img src={page.logoUrl} alt="" className="h-8 w-8 rounded-md border border-border object-cover" />
+                      ) : (
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: page.brandColor }} />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{page.name}</p>
+                        <p className="text-xs text-muted-foreground">{page.ctaTemplates.length} CTA</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {page.ctaTemplates.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No custom CTA yet.</p>
+                      ) : (
+                        page.ctaTemplates.map((cta) => (
+                          <div key={cta} className="flex items-start gap-2 rounded-md bg-secondary/50 p-2">
+                            <p className="min-w-0 flex-1 text-xs leading-relaxed">{cta}</p>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0"
+                              onClick={() => void handleRemoveCta(page.id, cta)}
+                              disabled={isSavingCta}
+                              title="Remove CTA"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
