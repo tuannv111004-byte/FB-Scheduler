@@ -109,6 +109,8 @@ type ViaRow = {
   outlook_password: string
   via_email: string
   avatar_url: string | null
+  description: string
+  notes: string
   status: ViaStatus
   location: ViaLocation
   created_at: string
@@ -259,6 +261,8 @@ function mapViaRow(row: ViaRow): ViaAccount {
     outlookPassword: row.outlook_password,
     viaEmail: row.via_email,
     avatarUrl: row.avatar_url ?? undefined,
+    description: row.description ?? '',
+    notes: row.notes ?? '',
     status: row.status,
     location: row.location,
     pageIds: row.page_vias?.map((item) => item.page_id) ?? [],
@@ -411,6 +415,8 @@ function viaPayload(input: ViaInput) {
     outlook_password: input.outlookPassword,
     via_email: input.viaEmail,
     avatar_url: input.avatarUrl || null,
+    description: input.description,
+    notes: input.notes,
     status: input.status,
     location: input.location,
     updated_at: new Date().toISOString(),
@@ -1084,6 +1090,8 @@ export async function updateViaRemote(id: string, updates: Partial<ViaInput>) {
   if (updates.outlookPassword !== undefined) payload.outlook_password = updates.outlookPassword
   if (updates.viaEmail !== undefined) payload.via_email = updates.viaEmail
   if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl || null
+  if (updates.description !== undefined) payload.description = updates.description
+  if (updates.notes !== undefined) payload.notes = updates.notes
   if (updates.status !== undefined) payload.status = updates.status
   if (updates.location !== undefined) payload.location = updates.location
 

@@ -248,6 +248,7 @@ export function ViaManager() {
                     <TableHead>Owner</TableHead>
                     <TableHead>Outlook</TableHead>
                     <TableHead>Mail Via</TableHead>
+                    <TableHead>Notes</TableHead>
                     <TableHead>Pages</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Location</TableHead>
@@ -310,6 +311,14 @@ export function ViaManager() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-foreground">{via.viaEmail || '-'}</TableCell>
+                      <TableCell>
+                        <div className="max-w-56 space-y-1">
+                          <p className="truncate text-sm text-foreground">{via.description || '-'}</p>
+                          {via.notes && (
+                            <p className="truncate text-xs text-muted-foreground">{via.notes}</p>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {via.pageIds.length === 0 ? (

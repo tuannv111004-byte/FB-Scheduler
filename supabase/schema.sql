@@ -58,6 +58,8 @@ create table if not exists vias (
   outlook_password text not null default '',
   via_email text not null default '',
   avatar_url text,
+  description text not null default '',
+  notes text not null default '',
   status text not null default 'active',
   location text not null default 'personal_laptop',
   created_at timestamptz not null default now(),
@@ -65,6 +67,8 @@ create table if not exists vias (
 );
 
 alter table vias add column if not exists account_link text;
+alter table vias add column if not exists description text not null default '';
+alter table vias add column if not exists notes text not null default '';
 
 create table if not exists sources (
   id uuid primary key default gen_random_uuid(),

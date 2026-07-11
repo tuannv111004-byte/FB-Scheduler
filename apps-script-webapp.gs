@@ -20,7 +20,7 @@ const SHEETS = {
 
 const BACKUP_TABLE_HEADERS = {
   pages: ['id', 'name', 'page_url', 'logo_url', 'brand_color', 'is_active', 'posts_per_day', 'time_slots', 'notes', 'created_at', 'updated_at'],
-  vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'source_avatar_url', 'avatar_drive_file_id', 'avatar_drive_web_view_link', 'avatar_drive_direct_url', 'avatar_drive_copy_error', 'status', 'location', 'created_at', 'updated_at'],
+  vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'source_avatar_url', 'avatar_drive_file_id', 'avatar_drive_web_view_link', 'avatar_drive_direct_url', 'avatar_drive_copy_error', 'description', 'notes', 'status', 'location', 'created_at', 'updated_at'],
   page_vias: ['page_id', 'via_id', 'created_at'],
   posts: ['id', 'page_id', 'post_date', 'time_slot', 'image_path', 'image_url', 'source_image_url', 'drive_file_id', 'drive_web_view_link', 'drive_direct_url', 'drive_copy_error', 'caption', 'ads_link', 'status', 'notes', 'created_at', 'updated_at'],
   notes: ['id', 'title', 'content', 'color', 'sort_order', 'created_at', 'updated_at'],

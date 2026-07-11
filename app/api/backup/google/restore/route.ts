@@ -25,7 +25,7 @@ type BackupRow = Record<string, unknown>
 
 const allowedColumns: Record<TableName, string[]> = {
   pages: ['id', 'name', 'page_url', 'logo_url', 'brand_color', 'is_active', 'posts_per_day', 'time_slots', 'notes', 'created_at', 'updated_at'],
-  vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'status', 'location', 'created_at', 'updated_at'],
+  vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'description', 'notes', 'status', 'location', 'created_at', 'updated_at'],
   page_vias: ['page_id', 'via_id', 'created_at'],
   posts: ['id', 'page_id', 'post_date', 'time_slot', 'image_path', 'image_url', 'caption', 'ads_link', 'status', 'notes', 'created_at', 'updated_at'],
   notes: ['id', 'title', 'content', 'color', 'sort_order', 'created_at', 'updated_at'],

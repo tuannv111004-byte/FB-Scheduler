@@ -69,6 +69,8 @@ export interface ViaInput {
   outlookPassword: string
   viaEmail: string
   avatarUrl?: string
+  description: string
+  notes: string
   status: ViaStatus
   location: ViaLocation
   pageIds: string[]

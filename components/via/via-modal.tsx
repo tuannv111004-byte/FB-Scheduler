@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -42,6 +43,8 @@ const defaultViaInput: ViaInput = {
   outlookPassword: '',
   viaEmail: '',
   avatarUrl: '',
+  description: '',
+  notes: '',
   status: 'active',
   location: 'personal_laptop',
   pageIds: [],
@@ -104,6 +107,8 @@ export function ViaModal({
         outlookPassword: via.outlookPassword,
         viaEmail: via.viaEmail,
         avatarUrl: via.avatarUrl || '',
+        description: via.description,
+        notes: via.notes,
         status: via.status,
         location: via.location,
         pageIds: [...via.pageIds],
@@ -166,6 +171,8 @@ export function ViaModal({
         outlookPassword: formData.outlookPassword.trim(),
         viaEmail: formData.viaEmail.trim(),
         avatarUrl,
+        description: formData.description.trim(),
+        notes: formData.notes.trim(),
       })
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not upload avatar image.')
@@ -334,6 +341,33 @@ export function ViaModal({
               {selectedAvatarFile && (
                 <p className="text-xs text-muted-foreground">{selectedAvatarFile.name}</p>
               )}
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="via-description">Description</Label>
+              <Textarea
+                id="via-description"
+                value={formData.description}
+                onChange={(event) =>
+                  setFormData((current) => ({ ...current, description: event.target.value }))
+                }
+                placeholder="Short context about this via"
+                className="min-h-24"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="via-notes">Notes</Label>
+              <Textarea
+                id="via-notes"
+                value={formData.notes}
+                onChange={(event) =>
+                  setFormData((current) => ({ ...current, notes: event.target.value }))
+                }
+                placeholder="Extra reminders, warnings, or account details"
+                className="min-h-24"
+              />
             </div>
           </div>
 
