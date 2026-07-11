@@ -14,6 +14,7 @@ import {
   updatePageRemote,
   updatePostRemote,
 } from './supabase'
+import { scheduleGoogleSheetHardSync } from './google-hard-sync'
 
 interface AppState {
   pages: FacebookPage[]
@@ -190,6 +191,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
         isSyncing: false,
       }))
+      scheduleGoogleSheetHardSync('pages')
     } catch (error) {
       set({ isSyncing: false })
       throw error
@@ -212,6 +214,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           isSyncing: false,
         }
       })
+      scheduleGoogleSheetHardSync('pages')
     } catch (error) {
       set({ isSyncing: false })
       throw error
@@ -232,6 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           isSyncing: false,
         }
       })
+      scheduleGoogleSheetHardSync('pages')
     } catch (error) {
       set({ isSyncing: false })
       throw error

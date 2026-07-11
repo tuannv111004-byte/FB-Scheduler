@@ -25,6 +25,7 @@ import {
   isSupabaseConfigured,
   updateNoteRemote,
 } from '@/lib/supabase'
+import { scheduleGoogleSheetHardSync } from '@/lib/google-hard-sync'
 import { NoteModal } from './note-modal'
 
 function getNextSortOrder(notes: StickyNoteType[]) {
@@ -144,6 +145,7 @@ export function NotesBoard() {
       if (editingNote) {
         const updatedNote = await updateNoteRemote(editingNote.id, value)
         setNotes((current) => current.map((note) => (note.id === editingNote.id ? updatedNote : note)))
+        scheduleGoogleSheetHardSync('notes')
         toast({ title: 'Note updated' })
       } else {
         const createdNote = await createNoteRemote({
@@ -151,6 +153,7 @@ export function NotesBoard() {
           sortOrder: getNextSortOrder(notes),
         })
         setNotes((current) => [...current, createdNote])
+        scheduleGoogleSheetHardSync('notes')
         toast({ title: 'Note created' })
       }
 
@@ -174,6 +177,7 @@ export function NotesBoard() {
     try {
       await deleteNoteRemote(noteId)
       setNotes((current) => current.filter((note) => note.id !== noteId))
+      scheduleGoogleSheetHardSync('notes')
       toast({ title: 'Note deleted' })
     } catch (error) {
       toast({
@@ -232,6 +236,7 @@ export function NotesBoard() {
       )
 
       setNotes(updatedNotes)
+      scheduleGoogleSheetHardSync('notes')
       toast({ title: 'Notes reordered' })
     } catch (error) {
       toast({

@@ -9,19 +9,11 @@ const tableNames = [
   'posts',
   'notes',
   'sources',
-  'sports_teams',
-  'sports_players',
-  'poster_lab_franchises',
-  'poster_lab_sequels',
 ] as const
 
 const deleteOrder = [
   'page_vias',
   'posts',
-  'sports_players',
-  'sports_teams',
-  'poster_lab_sequels',
-  'poster_lab_franchises',
   'notes',
   'sources',
   'vias',
@@ -35,10 +27,6 @@ const insertOrder = [
   'posts',
   'notes',
   'sources',
-  'sports_teams',
-  'sports_players',
-  'poster_lab_franchises',
-  'poster_lab_sequels',
 ] as const
 
 type BackupTableName = (typeof tableNames)[number]

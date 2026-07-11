@@ -35,10 +35,12 @@ import { useAppStore } from '@/lib/store'
 import {
   createViaRemote,
   deleteViaRemote,
+  fetchPagesRemote,
   fetchViasRemote,
   isSupabaseConfigured,
   updateViaRemote,
 } from '@/lib/supabase'
+import { scheduleGoogleSheetHardSync } from '@/lib/google-hard-sync'
 import { toast } from '@/hooks/use-toast'
 import type { ViaAccount, ViaInput } from '@/lib/types'
 import { ViaModal } from './via-modal'
@@ -81,7 +83,8 @@ function maskValue(value: string) {
 }
 
 export function ViaManager() {
-  const pages = useAppStore((state) => state.pages)
+  const storePages = useAppStore((state) => state.pages)
+  const [pages, setPages] = useState(storePages)
   const [vias, setVias] = useState<ViaAccount[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -95,6 +98,10 @@ export function ViaManager() {
   )
 
   useEffect(() => {
+    setPages(storePages)
+  }, [storePages])
+
+  useEffect(() => {
     if (!isSupabaseConfigured) {
       setIsLoading(false)
       return
@@ -104,8 +111,12 @@ export function ViaManager() {
 
     const loadVias = async () => {
       try {
-        const remoteVias = await fetchViasRemote()
+        const [remotePages, remoteVias] = await Promise.all([
+          fetchPagesRemote(),
+          fetchViasRemote(),
+        ])
         if (!cancelled) {
+          setPages(remotePages)
           setVias(remoteVias)
         }
       } catch (error) {
@@ -148,10 +159,12 @@ export function ViaManager() {
       if (editingVia) {
         const updatedVia = await updateViaRemote(editingVia.id, value)
         setVias((current) => current.map((via) => (via.id === editingVia.id ? updatedVia : via)))
+        scheduleGoogleSheetHardSync('vias')
         toast({ title: 'Via updated' })
       } else {
         const createdVia = await createViaRemote(value)
         setVias((current) => [createdVia, ...current])
+        scheduleGoogleSheetHardSync('vias')
         toast({ title: 'Via created' })
       }
 
@@ -174,6 +187,7 @@ export function ViaManager() {
     try {
       await deleteViaRemote(viaPendingDelete.id)
       setVias((current) => current.filter((via) => via.id !== viaPendingDelete.id))
+      scheduleGoogleSheetHardSync('vias')
       toast({ title: 'Via deleted' })
       setViaPendingDelete(null)
     } catch (error) {

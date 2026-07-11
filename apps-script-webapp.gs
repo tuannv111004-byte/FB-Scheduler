@@ -20,15 +20,11 @@ const SHEETS = {
 
 const BACKUP_TABLE_HEADERS = {
   pages: ['id', 'name', 'page_url', 'logo_url', 'brand_color', 'is_active', 'posts_per_day', 'time_slots', 'notes', 'created_at', 'updated_at'],
-  vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'status', 'location', 'created_at', 'updated_at'],
+  vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'source_avatar_url', 'avatar_drive_file_id', 'avatar_drive_web_view_link', 'avatar_drive_direct_url', 'avatar_drive_copy_error', 'status', 'location', 'created_at', 'updated_at'],
   page_vias: ['page_id', 'via_id', 'created_at'],
   posts: ['id', 'page_id', 'post_date', 'time_slot', 'image_path', 'image_url', 'source_image_url', 'drive_file_id', 'drive_web_view_link', 'drive_direct_url', 'drive_copy_error', 'caption', 'ads_link', 'status', 'notes', 'created_at', 'updated_at'],
   notes: ['id', 'title', 'content', 'color', 'sort_order', 'created_at', 'updated_at'],
   sources: ['id', 'name', 'url', 'type', 'description', 'notes', 'is_active', 'created_at', 'updated_at'],
-  sports_teams: ['id', 'name', 'sport', 'league', 'city', 'country', 'logo_url', 'owner_name', 'head_coach', 'assistant_coaches', 'legends', 'notes', 'created_at', 'updated_at'],
-  sports_players: ['id', 'team_id', 'full_name', 'position', 'jersey_number', 'birth_date', 'nationality', 'photo_url', 'height', 'weight', 'status', 'spouse', 'father', 'mother', 'children', 'bio', 'notes', 'created_at', 'updated_at'],
-  poster_lab_franchises: ['id', 'franchise_name', 'latest_official_title', 'genre', 'notes', 'tmdb_movie_id', 'tmdb_genre_ids', 'tmdb_genre_names', 'release_date', 'overview', 'poster_path', 'backdrop_path', 'source_category', 'created_at', 'updated_at'],
-  poster_lab_sequels: ['id', 'franchise_id', 'fake_title', 'release_year', 'tagline', 'synopsis', 'visual_hook', 'prompt', 'caption', 'is_used', 'created_at', 'updated_at'],
 }
 
 function authorizeGooglePoc() {
@@ -79,6 +75,8 @@ function doPost(event) {
         return jsonResponse(createPostWithMedia(spreadsheet, body))
       case 'backup-postops-database':
         return jsonResponse(backupPostOpsDatabase(spreadsheet, body))
+      case 'restore-postops-database':
+        return jsonResponse(readPostOpsDatabaseBackup(spreadsheet))
       default:
         return jsonResponse({ ok: false, error: 'Unsupported action.' })
     }
@@ -101,6 +99,9 @@ function backupPostOpsDatabase(spreadsheet, body) {
     if (tableName === 'posts' && folderId) {
       rows = rows.map((row) => copyPostImageToDrive(row, folderId, makePublic, mediaCache))
     }
+    if (tableName === 'vias' && folderId) {
+      rows = rows.map((row) => copyViaAvatarToDrive(row, folderId, makePublic, mediaCache))
+    }
     replaceBackupSheet(spreadsheet, tableName, BACKUP_TABLE_HEADERS[tableName], rows)
     counts[tableName] = rows.length
     totalRows += rows.length
@@ -119,6 +120,45 @@ function backupPostOpsDatabase(spreadsheet, body) {
     counts,
     spreadsheetUrl: spreadsheet.getUrl(),
   }
+}
+
+function readPostOpsDatabaseBackup(spreadsheet) {
+  const tables = {}
+  const counts = {}
+  let totalRows = 0
+
+  Object.keys(BACKUP_TABLE_HEADERS).forEach((tableName) => {
+    const rows = readBackupSheetObjects(spreadsheet, tableName, BACKUP_TABLE_HEADERS[tableName])
+    tables[tableName] = rows
+    counts[tableName] = rows.length
+    totalRows += rows.length
+  })
+
+  return {
+    ok: true,
+    app: 'postops',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    tables,
+    counts,
+    totalRows,
+    spreadsheetUrl: spreadsheet.getUrl(),
+  }
+}
+
+function readBackupSheetObjects(spreadsheet, sheetName, expectedHeaders) {
+  const sheet = spreadsheet.getSheetByName(sheetName)
+  if (!sheet || sheet.getLastRow() < 2) return []
+
+  const values = sheet.getDataRange().getDisplayValues()
+  const headers = values[0]
+  return values.slice(1).filter((row) => row.some(Boolean)).map((row) => {
+    const raw = objectFromRow(headers, row)
+    return expectedHeaders.reduce((result, header) => {
+      result[header] = raw[header] === undefined ? '' : raw[header]
+      return result
+    }, {})
+  })
 }
 
 function copyPostImageToDrive(row, folderId, makePublic, mediaCache) {
@@ -187,6 +227,71 @@ function copyPostImageToDrive(row, folderId, makePublic, mediaCache) {
   return nextRow
 }
 
+function copyViaAvatarToDrive(row, folderId, makePublic, mediaCache) {
+  const nextRow = Object.assign({}, row)
+  const sourceUrl = String(row.avatar_url || '').trim()
+  if (!sourceUrl || sourceUrl.indexOf('http') !== 0) return nextRow
+
+  const cacheKey = `via-avatar:${sourceUrl}`
+  const existing = mediaCache[cacheKey]
+  if (existing) {
+    nextRow.source_avatar_url = sourceUrl
+    nextRow.avatar_url = existing.thumbnail_url || existing.direct_url || existing.web_view_link
+    nextRow.avatar_drive_file_id = existing.drive_file_id
+    nextRow.avatar_drive_web_view_link = existing.web_view_link
+    nextRow.avatar_drive_direct_url = existing.direct_url
+    return nextRow
+  }
+
+  try {
+    const response = UrlFetchApp.fetch(sourceUrl, {
+      followRedirects: true,
+      muteHttpExceptions: true,
+    })
+
+    const status = response.getResponseCode()
+    if (status < 200 || status >= 300) {
+      nextRow.avatar_drive_copy_error = `Fetch failed: ${status}`
+      return nextRow
+    }
+
+    const headers = response.getHeaders()
+    const mimeType = headers['Content-Type'] || headers['content-type'] || 'application/octet-stream'
+    const fileName = viaAvatarFileName(row, mimeType)
+    const blob = response.getBlob().setName(fileName)
+    const file = DriveApp.getFolderById(folderId).createFile(blob)
+
+    if (makePublic) {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW)
+    }
+
+    const driveFileId = file.getId()
+    const mediaRow = {
+      source_url: cacheKey,
+      post_id: String(row.id || ''),
+      drive_file_id: driveFileId,
+      file_name: fileName,
+      mime_type: mimeType,
+      size: String(response.getContent().length),
+      web_view_link: file.getUrl(),
+      direct_url: `https://drive.google.com/uc?id=${encodeURIComponent(driveFileId)}`,
+      thumbnail_url: `https://lh3.googleusercontent.com/d/${encodeURIComponent(driveFileId)}`,
+      created_at: new Date().toISOString(),
+    }
+
+    mediaCache[cacheKey] = mediaRow
+    nextRow.source_avatar_url = sourceUrl
+    nextRow.avatar_url = mediaRow.thumbnail_url
+    nextRow.avatar_drive_file_id = mediaRow.drive_file_id
+    nextRow.avatar_drive_web_view_link = mediaRow.web_view_link
+    nextRow.avatar_drive_direct_url = mediaRow.direct_url
+  } catch (error) {
+    nextRow.avatar_drive_copy_error = error.message || String(error)
+  }
+
+  return nextRow
+}
+
 function backupImageFileName(row, mimeType) {
   const extensionByMime = {
     'image/jpeg': 'jpg',
@@ -198,6 +303,19 @@ function backupImageFileName(row, mimeType) {
   const extension = extensionByMime[String(mimeType).split(';')[0].toLowerCase()] || 'img'
   const postId = String(row.id || Utilities.getUuid()).replace(/[^a-zA-Z0-9_-]/g, '-')
   return `post-${postId}.${extension}`
+}
+
+function viaAvatarFileName(row, mimeType) {
+  const extensionByMime = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+  }
+  const extension = extensionByMime[String(mimeType).split(';')[0].toLowerCase()] || 'img'
+  const viaId = String(row.id || Utilities.getUuid()).replace(/[^a-zA-Z0-9_-]/g, '-')
+  return `via-avatar-${viaId}.${extension}`
 }
 
 function readBackupMediaCache(spreadsheet) {

@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Bell,
   Clock,
+  CloudDownload,
   CloudUpload,
   Database,
   Download,
@@ -69,15 +70,28 @@ type GoogleBackupResponse = {
   exportedAt?: string
 }
 
+type GoogleRestoreResponse = {
+  ok: boolean
+  error?: string
+  importedRows?: number
+  sourceRows?: number
+  summary?: ImportSummary
+  spreadsheetUrl?: string
+  exportedAt?: string
+  mode?: ImportMode
+}
+
 export default function SettingsPage() {
   const { resolvedTheme, setTheme } = useTheme()
   const { toast } = useToast()
   const [mounted, setMounted] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isGoogleBackingUp, setIsGoogleBackingUp] = useState(false)
+  const [isGoogleRestoring, setIsGoogleRestoring] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importMode, setImportMode] = useState<ImportMode>('merge')
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
+  const [googleRestoreDialogOpen, setGoogleRestoreDialogOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -85,8 +99,9 @@ export default function SettingsPage() {
   }, [])
 
   const isDarkMode = mounted ? resolvedTheme !== 'light' : true
-  const supabaseDataActionsDisabled = !isSupabaseConfigured || isExporting || isImporting
-  const googleBackupDisabled = isGoogleBackingUp || isExporting || isImporting
+  const supabaseDataActionsDisabled = !isSupabaseConfigured || isExporting || isImporting || isGoogleRestoring
+  const googleBackupDisabled = isGoogleBackingUp || isGoogleRestoring || isExporting || isImporting
+  const googleRestoreDisabled = !isSupabaseConfigured || isGoogleRestoring || isGoogleBackingUp || isExporting || isImporting
 
   const handleExportAll = async () => {
     setIsExporting(true)
@@ -147,6 +162,45 @@ export default function SettingsPage() {
       })
     } finally {
       setIsGoogleBackingUp(false)
+    }
+  }
+
+  const handleGoogleRestore = async () => {
+    setIsGoogleRestoring(true)
+    try {
+      const response = await fetch('/api/backup/google/restore', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mode: importMode }),
+      })
+      const result = (await response.json().catch(() => null)) as GoogleRestoreResponse | null
+
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || 'Could not restore from Google Sheets.')
+      }
+
+      const description = result.summary
+        ? summarizeImport(result.summary)
+        : `Imported ${result.importedRows ?? 0} rows from Google Sheets.`
+
+      toast({
+        title: 'Google restore complete',
+        description: description || 'No rows were imported.',
+      })
+
+      setGoogleRestoreDialogOpen(false)
+      window.setTimeout(() => window.location.reload(), 700)
+    } catch (error) {
+      toast({
+        title: 'Google restore failed',
+        description: error instanceof Error ? error.message : 'Could not restore from Google Sheets.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsGoogleRestoring(false)
     }
   }
 
@@ -323,7 +377,7 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                   <Label>Backup file</Label>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Export includes pages, posts, notes, vias, page links, sources, teams, players, Poster Lab movies, and sequels.
+                    Export includes pages, posts, notes, vias, page links, and sources.
                   </p>
                 </div>
                 <Button
@@ -342,19 +396,31 @@ export default function SettingsPage() {
                 <div className="space-y-1">
                   <Label>Google Sheets backup</Label>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Sync Supabase rows into Google Sheets as database-style backup tables.
+                    Pages, vias, notes, and sources auto-save to Google Sheets after each change. Use this to sync ready posts or restore data manually.
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleGoogleBackup}
-                  disabled={googleBackupDisabled}
-                  className="gap-2"
-                >
-                  {isGoogleBackingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
-                  Sync to Google
-                </Button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGoogleBackup}
+                    disabled={googleBackupDisabled}
+                    className="gap-2"
+                  >
+                    {isGoogleBackingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+                    Sync to Google
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setGoogleRestoreDialogOpen(true)}
+                    disabled={googleRestoreDisabled}
+                    className="gap-2"
+                  >
+                    {isGoogleRestoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                    Restore from Google
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-3 rounded-md border border-border p-4">
@@ -371,7 +437,7 @@ export default function SettingsPage() {
                       size="sm"
                       variant={importMode === 'merge' ? 'default' : 'ghost'}
                       onClick={() => setImportMode('merge')}
-                      disabled={isImporting}
+                      disabled={isImporting || isGoogleRestoring}
                     >
                       Merge
                     </Button>
@@ -380,7 +446,7 @@ export default function SettingsPage() {
                       size="sm"
                       variant={importMode === 'replace' ? 'default' : 'ghost'}
                       onClick={() => setImportMode('replace')}
-                      disabled={isImporting}
+                      disabled={isImporting || isGoogleRestoring}
                     >
                       Replace
                     </Button>
@@ -449,6 +515,26 @@ export default function SettingsPage() {
             <AlertDialogCancel disabled={isImporting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleImportConfirmed} disabled={isImporting}>
               {isImporting ? 'Importing...' : 'Import'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={googleRestoreDialogOpen} onOpenChange={setGoogleRestoreDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore from Google Sheets?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Google Sheets will be imported in {importMode} mode.
+              {importMode === 'replace'
+                ? ' Existing Supabase data will be deleted first. The Google backup posts tab only contains ready posts.'
+                : ' Existing rows with the same IDs will be updated. The Google backup posts tab only contains ready posts.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isGoogleRestoring}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleGoogleRestore} disabled={isGoogleRestoring}>
+              {isGoogleRestoring ? 'Restoring...' : 'Restore'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

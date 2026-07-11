@@ -17,16 +17,13 @@ import {
   FileText,
   PenLine,
   Calendar,
-  CalendarSearch,
   Settings,
   Bell,
   Facebook,
-  Film,
   Menu,
   NotebookText,
   SearchCheck,
   ShieldCheck,
-  Trophy,
 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
 
@@ -36,10 +33,7 @@ const navigation = [
   { name: 'Posts', href: '/posts', icon: FileText },
   { name: 'Composer', href: '/composer', icon: PenLine },
   { name: 'Schedule', href: '/schedule', icon: Calendar },
-  { name: 'Trend Calendar', href: '/trend-calendar', icon: CalendarSearch },
   { name: 'Notes', href: '/notes', icon: NotebookText },
-  { name: 'Poster Lab', href: '/poster-lab', icon: Film },
-  { name: 'Team', href: '/players', icon: Trophy },
   { name: 'Sources', href: '/sources', icon: SearchCheck },
   { name: 'Via', href: '/via', icon: ShieldCheck },
 ]

@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { uploadViaAvatarImage } from '@/lib/supabase'
 import type { FacebookPage, ViaAccount, ViaInput, ViaLocation, ViaStatus } from '@/lib/types'
 
 type ViaModalProps = {
@@ -61,6 +62,17 @@ function toLabel(value: ViaStatus | ViaLocation) {
   }
 }
 
+function extractImageFileFromClipboard(event: React.ClipboardEvent) {
+  for (const item of Array.from(event.clipboardData.items)) {
+    if (!item.type.startsWith('image/')) continue
+
+    const file = item.getAsFile()
+    if (file) return file
+  }
+
+  return null
+}
+
 export function ViaModal({
   open,
   onOpenChange,
@@ -70,9 +82,16 @@ export function ViaModal({
   onSave,
 }: ViaModalProps) {
   const [formData, setFormData] = useState<ViaInput>(defaultViaInput)
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('')
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   useEffect(() => {
     if (!open) return
+    setSelectedAvatarFile(null)
+    setAvatarPreviewUrl('')
+    setErrorMessage('')
 
     if (via) {
       setFormData({
@@ -95,6 +114,20 @@ export function ViaModal({
     setFormData(defaultViaInput)
   }, [open, via])
 
+  useEffect(() => {
+    if (!selectedAvatarFile) {
+      setAvatarPreviewUrl('')
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(selectedAvatarFile)
+    setAvatarPreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedAvatarFile])
+
   const linkedPages = useMemo(
     () => pages.filter((page) => formData.pageIds.includes(page.id)),
     [formData.pageIds, pages]
@@ -111,19 +144,46 @@ export function ViaModal({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    await onSave({
-      ...formData,
-      accountName: formData.accountName.trim(),
-      accountLink: formData.accountLink.trim(),
-      accountPassword: formData.accountPassword.trim(),
-      displayName: formData.displayName.trim(),
-      twoFactorCode: formData.twoFactorCode.trim(),
-      outlookEmail: formData.outlookEmail.trim(),
-      outlookPassword: formData.outlookPassword.trim(),
-      viaEmail: formData.viaEmail.trim(),
-      avatarUrl: formData.avatarUrl?.trim() || '',
-    })
+    setErrorMessage('')
+
+    try {
+      setIsUploadingAvatar(Boolean(selectedAvatarFile))
+      let avatarUrl = formData.avatarUrl?.trim() || ''
+
+      if (selectedAvatarFile) {
+        const uploadedAvatar = await uploadViaAvatarImage(selectedAvatarFile)
+        avatarUrl = uploadedAvatar.imageUrl
+      }
+
+      await onSave({
+        ...formData,
+        accountName: formData.accountName.trim(),
+        accountLink: formData.accountLink.trim(),
+        accountPassword: formData.accountPassword.trim(),
+        displayName: formData.displayName.trim(),
+        twoFactorCode: formData.twoFactorCode.trim(),
+        outlookEmail: formData.outlookEmail.trim(),
+        outlookPassword: formData.outlookPassword.trim(),
+        viaEmail: formData.viaEmail.trim(),
+        avatarUrl,
+      })
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not upload avatar image.')
+    } finally {
+      setIsUploadingAvatar(false)
+    }
   }
+
+  const handleAvatarPaste = (event: React.ClipboardEvent) => {
+    const imageFile = extractImageFileFromClipboard(event)
+    if (!imageFile) return
+
+    event.preventDefault()
+    setErrorMessage('')
+    setSelectedAvatarFile(imageFile)
+  }
+
+  const avatarPreview = avatarPreviewUrl || formData.avatarUrl || ''
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -237,18 +297,51 @@ export function ViaModal({
                 placeholder="Email linked to this via"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2" onPaste={handleAvatarPaste}>
               <Label htmlFor="via-avatar-url">Avatar URL</Label>
-              <Input
-                id="via-avatar-url"
-                value={formData.avatarUrl || ''}
-                onChange={(event) =>
-                  setFormData((current) => ({ ...current, avatarUrl: event.target.value }))
-                }
-                placeholder="https://..."
-              />
+              <div className="flex gap-3">
+                {avatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt=""
+                    className="h-11 w-11 rounded-xl border border-border object-cover"
+                  />
+                ) : (
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-secondary text-xs font-semibold text-foreground">
+                    {formData.displayName.slice(0, 2).toUpperCase() || 'VA'}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Input
+                    id="via-avatar-url"
+                    value={formData.avatarUrl || ''}
+                    onChange={(event) => {
+                      setSelectedAvatarFile(null)
+                      setFormData((current) => ({ ...current, avatarUrl: event.target.value }))
+                    }}
+                    placeholder="Paste image here or enter URL"
+                  />
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => setSelectedAvatarFile(event.target.files?.[0] ?? null)}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Copy an image and paste it here. It uploads to storage when you save.
+              </p>
+              {selectedAvatarFile && (
+                <p className="text-xs text-muted-foreground">{selectedAvatarFile.name}</p>
+              )}
             </div>
           </div>
+
+          {errorMessage && (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {errorMessage}
+            </p>
+          )}
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -330,12 +423,13 @@ export function ViaModal({
               type="submit"
               disabled={
                 isSaving ||
+                isUploadingAvatar ||
                 formData.accountName.trim().length === 0 ||
                 formData.accountPassword.trim().length === 0 ||
                 formData.displayName.trim().length === 0
               }
             >
-              {isSaving ? 'Saving...' : via ? 'Save Via' : 'Create Via'}
+              {isUploadingAvatar ? 'Uploading avatar...' : isSaving ? 'Saving...' : via ? 'Save Via' : 'Create Via'}
             </Button>
           </DialogFooter>
         </form>

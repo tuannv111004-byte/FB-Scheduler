@@ -38,6 +38,7 @@ import {
   isSupabaseConfigured,
   updateSourceRemote,
 } from '@/lib/supabase'
+import { scheduleGoogleSheetHardSync } from '@/lib/google-hard-sync'
 import { toast } from '@/hooks/use-toast'
 import type { SourceInput, SourceItem, SourceType } from '@/lib/types'
 import { SourceModal } from './source-modal'
@@ -123,10 +124,12 @@ export function SourcesManager() {
         setSources((current) =>
           current.map((source) => (source.id === editingSource.id ? updatedSource : source))
         )
+        scheduleGoogleSheetHardSync('sources')
         toast({ title: 'Source updated' })
       } else {
         const createdSource = await createSourceRemote(value)
         setSources((current) => [createdSource, ...current])
+        scheduleGoogleSheetHardSync('sources')
         toast({ title: 'Source created' })
       }
 
@@ -149,6 +152,7 @@ export function SourcesManager() {
     try {
       await deleteSourceRemote(sourcePendingDelete.id)
       setSources((current) => current.filter((source) => source.id !== sourcePendingDelete.id))
+      scheduleGoogleSheetHardSync('sources')
       toast({ title: 'Source deleted' })
       setSourcePendingDelete(null)
     } catch (error) {

@@ -12,10 +12,6 @@ const tableNames = [
   'posts',
   'notes',
   'sources',
-  'sports_teams',
-  'sports_players',
-  'poster_lab_franchises',
-  'poster_lab_sequels',
 ] as const
 
 function unauthorized() {
