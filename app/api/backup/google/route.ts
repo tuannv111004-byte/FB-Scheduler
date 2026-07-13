@@ -83,6 +83,16 @@ function getBackupPostLimit() {
   return Math.floor(value)
 }
 
+function isDateValue(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function addDays(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 function compareReadyPosts(a: Record<string, unknown>, b: Record<string, unknown>) {
   const aDate = String(a.post_date || '')
   const bDate = String(b.post_date || '')
@@ -97,6 +107,7 @@ export async function POST(request: Request) {
   if (!(await isAuthorized(request))) return unauthorized()
 
   try {
+    const requestUrl = new URL(request.url)
     const scriptUrl = getOptionalEnv('GOOGLE_APPS_SCRIPT_URL') || getOptionalEnv('GOOGLE_APPS_SCRIPT_WEBAPP_URL')
     if (!scriptUrl) throw new Error('GOOGLE_APPS_SCRIPT_URL or GOOGLE_APPS_SCRIPT_WEBAPP_URL is not configured.')
 
@@ -105,10 +116,25 @@ export async function POST(request: Request) {
 
     const backup = await exportPostOpsBackup()
     const readyPostLimit = getBackupPostLimit()
+    const postWindowStart = requestUrl.searchParams.get('postWindowStart') || ''
+    const postWindowDays = Number(requestUrl.searchParams.get('postWindowDays') || '')
+    const hasPostWindow =
+      isDateValue(postWindowStart) &&
+      Number.isFinite(postWindowDays) &&
+      postWindowDays > 0
+    const postWindowEnd = hasPostWindow
+      ? addDays(postWindowStart, Math.min(Math.floor(postWindowDays), 365))
+      : ''
+
     backup.tables.posts = backup.tables.posts
       .filter((post) => post.status === 'ready')
+      .filter((post) => {
+        if (!hasPostWindow) return true
+        const postDate = String(post.post_date || '')
+        return postDate >= postWindowStart && postDate < postWindowEnd
+      })
       .sort(compareReadyPosts)
-      .slice(0, readyPostLimit)
+      .slice(0, hasPostWindow ? Math.max(readyPostLimit, 1000) : readyPostLimit)
     const counts = Object.fromEntries(tableNames.map((tableName) => [tableName, backup.tables[tableName]?.length ?? 0]))
     const totalRows = Object.values(counts).reduce((sum, count) => sum + count, 0)
 

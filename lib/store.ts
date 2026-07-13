@@ -8,6 +8,7 @@ import {
   createPostRemote,
   deletePageRemote,
   deletePostRemote,
+  deletePostsRemote,
   fetchPagesRemote,
   fetchPostsRemote,
   isSupabaseConfigured,
@@ -31,6 +32,7 @@ interface AppState {
   addPost: (post: PostInput) => Promise<void>
   updatePost: (id: string, updates: Partial<PostInput>) => Promise<void>
   deletePost: (id: string) => Promise<void>
+  deletePosts: (ids: string[]) => Promise<void>
   duplicatePost: (id: string) => Promise<void>
   markAsPosted: (id: string) => Promise<void>
   updatePostStatus: (id: string, status: PostStatus) => Promise<void>
@@ -305,6 +307,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       set((state) => {
         const posts = state.posts.filter((post) => post.id !== id)
+        return {
+          ...withDerivedState(state.pages, posts, state.selectedDate, state.notifications),
+          isSyncing: false,
+        }
+      })
+    } catch (error) {
+      set({ isSyncing: false })
+      throw error
+    }
+  },
+
+  deletePosts: async (ids) => {
+    if (ids.length === 0) return
+
+    set({ isSyncing: true })
+    try {
+      if (shouldUseSupabaseRemote()) {
+        await deletePostsRemote(ids)
+      }
+
+      const idSet = new Set(ids)
+      set((state) => {
+        const posts = state.posts.filter((post) => !idSet.has(post.id))
         return {
           ...withDerivedState(state.pages, posts, state.selectedDate, state.notifications),
           isSyncing: false,

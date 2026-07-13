@@ -1179,6 +1179,14 @@ export async function deletePostRemote(id: string) {
   if (error) throw error
 }
 
+export async function deletePostsRemote(ids: string[]) {
+  if (ids.length === 0) return
+
+  const client = requireSupabase()
+  const { error } = await client.from('posts').delete().in('id', ids)
+  if (error) throw error
+}
+
 export async function uploadPostImage(file: File) {
   const uploadFile = await normalizeImageForUpload(file)
 

@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/lib/store'
 import { toast } from '@/hooks/use-toast'
+import { recordBackupFailure, recordBackupSuccess } from '@/lib/backup-health'
 import {
   Plus,
   MoreHorizontal,
@@ -322,6 +323,7 @@ export function PostsList() {
     pages,
     addPost,
     deletePost,
+    deletePosts,
     duplicatePost,
     markAsPosted,
     selectedDate: initialSelectedDate,
@@ -330,6 +332,8 @@ export function PostsList() {
   const [editingPost, setEditingPost] = useState<Post | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [postToDelete, setPostToDelete] = useState<Post | null>(null)
+  const [deleteDayDialogOpen, setDeleteDayDialogOpen] = useState(false)
+  const [isDeletingDayPosts, setIsDeletingDayPosts] = useState(false)
   const [selectedDate, setSelectedDate] = useState(() => {
     const savedValue = readPostsPreferences().selectedDate
     return typeof savedValue === 'string' && savedValue ? savedValue : initialSelectedDate
@@ -493,6 +497,14 @@ export function PostsList() {
   const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
   const activePageIdSet = useMemo(() => new Set(activePages.map((page) => page.id)), [activePages])
   const allPagesSelected = activePages.length > 0 && filterPageIds.length === activePages.length
+  const selectedDatePosts = useMemo(
+    () =>
+      posts
+        .filter((post) => activePageIdSet.has(post.pageId))
+        .filter((post) => post.postDate === getDisplayDateForTimeSlot(selectedDate, post.timeSlot))
+        .sort(comparePostsBySchedule),
+    [activePageIdSet, posts, selectedDate]
+  )
   const highlightTimeOptions = useMemo(
     () =>
       Array.from(
@@ -613,6 +625,55 @@ export function PostsList() {
   useEffect(() => {
     setFilterPageIds((current) => current.filter((pageId) => activePageIdSet.has(pageId)))
   }, [activePageIdSet])
+
+  const handleDeleteSelectedDatePosts = async () => {
+    if (selectedDatePosts.length === 0) return
+
+    setIsDeletingDayPosts(true)
+    try {
+      const params = new URLSearchParams({
+        hardSync: '1',
+        reason: 'delete-day-posts',
+        postWindowStart: selectedDate,
+        postWindowDays: '15',
+      })
+      const response = await fetch(`/api/backup/google?${params.toString()}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const result = await response.json().catch(() => null) as {
+        error?: string
+        exportedAt?: string
+        totalRows?: number
+      } | null
+
+      if (!response.ok) {
+        throw new Error(result?.error || 'Google backup failed, so posts were not deleted.')
+      }
+
+      recordBackupSuccess({
+        method: 'google',
+        completedAt: result?.exportedAt,
+        totalRows: result?.totalRows,
+      })
+
+      await deletePosts(selectedDatePosts.map((post) => post.id))
+      setDeleteDayDialogOpen(false)
+      toast({
+        title: 'Posts deleted',
+        description: `Backed up ready posts for 15 days, then deleted ${selectedDatePosts.length} post${selectedDatePosts.length === 1 ? '' : 's'} from ${selectedDate}.`,
+      })
+    } catch (error) {
+      recordBackupFailure('google', error)
+      toast({
+        title: 'Delete stopped',
+        description: error instanceof Error ? error.message : 'Could not back up Google Sheets before deleting.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsDeletingDayPosts(false)
+    }
+  }
 
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
@@ -804,10 +865,21 @@ export function PostsList() {
       <Card className="bg-card border-border">
         <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-4">
           <CardTitle className="text-lg font-semibold">Posts</CardTitle>
-          <Button onClick={handleAddNew}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Post
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDayDialogOpen(true)}
+              disabled={selectedDatePosts.length === 0 || isDeletingDayPosts}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Day
+            </Button>
+            <Button onClick={handleAddNew}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Post
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {/* Filters */}
@@ -1172,6 +1244,31 @@ export function PostsList() {
       </Card>
 
       <PostModal open={modalOpen} onOpenChange={setModalOpen} post={editingPost} />
+
+      <AlertDialog open={deleteDayDialogOpen} onOpenChange={setDeleteDayDialogOpen}>
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all posts for {selectedDate}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will first back up ready posts from {selectedDate} through the next 15 days to Google Sheets.
+              If the backup succeeds, {selectedDatePosts.length} post{selectedDatePosts.length === 1 ? '' : 's'} for this day will be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingDayPosts}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault()
+                void handleDeleteSelectedDatePosts()
+              }}
+              disabled={isDeletingDayPosts || selectedDatePosts.length === 0}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeletingDayPosts ? 'Backing up...' : 'Backup & Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="bg-card border-border">
