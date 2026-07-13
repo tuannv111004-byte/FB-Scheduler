@@ -134,8 +134,12 @@ export function ViaModal({
   }, [selectedAvatarFile])
 
   const linkedPages = useMemo(
-    () => pages.filter((page) => formData.pageIds.includes(page.id)),
+    () => pages.filter((page) => page.isActive && formData.pageIds.includes(page.id)),
     [formData.pageIds, pages]
+  )
+  const activePages = useMemo(
+    () => pages.filter((page) => page.isActive),
+    [pages]
   )
 
   const togglePage = (pageId: string, checked: boolean) => {
@@ -427,10 +431,10 @@ export function ViaModal({
             </div>
 
             <div className="grid gap-2 md:grid-cols-2">
-              {pages.length === 0 ? (
+              {activePages.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No pages available to link yet.</p>
               ) : (
-                pages.map((page) => (
+                activePages.map((page) => (
                   <label
                     key={page.id}
                     className="flex items-start gap-3 rounded-lg border border-border/70 bg-background/60 p-3"

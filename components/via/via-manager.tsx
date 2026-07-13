@@ -92,10 +92,13 @@ export function ViaManager() {
   const [editingVia, setEditingVia] = useState<ViaAccount | null>(null)
   const [viaPendingDelete, setViaPendingDelete] = useState<ViaAccount | null>(null)
 
+  const activePageIds = useMemo(() => new Set(pages.filter((page) => page.isActive).map((page) => page.id)), [pages])
   const pageNameMap = useMemo(
-    () => new Map(pages.map((page) => [page.id, page.name])),
+    () => new Map(pages.filter((page) => page.isActive).map((page) => [page.id, page.name])),
     [pages]
   )
+  const getActiveViaPageIds = (via: ViaAccount) =>
+    via.pageIds.filter((pageId) => activePageIds.has(pageId))
 
   useEffect(() => {
     setPages(storePages)
@@ -321,18 +324,18 @@ export function ViaManager() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {via.pageIds.length === 0 ? (
+                          {getActiveViaPageIds(via).length === 0 ? (
                             <span className="text-sm text-muted-foreground">No page</span>
                           ) : (
-                            via.pageIds.slice(0, 2).map((pageId) => (
+                            getActiveViaPageIds(via).slice(0, 2).map((pageId) => (
                               <Badge key={pageId} variant="outline">
                                 <Facebook className="h-3 w-3" />
                                 {pageNameMap.get(pageId) ?? 'Unknown'}
                               </Badge>
                             ))
                           )}
-                          {via.pageIds.length > 2 && (
-                            <Badge variant="secondary">+{via.pageIds.length - 2}</Badge>
+                          {getActiveViaPageIds(via).length > 2 && (
+                            <Badge variant="secondary">+{getActiveViaPageIds(via).length - 2}</Badge>
                           )}
                         </div>
                       </TableCell>

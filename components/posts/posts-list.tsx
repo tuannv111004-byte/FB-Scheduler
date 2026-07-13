@@ -490,24 +490,26 @@ export function PostsList() {
   const selectedPageIdSet = useMemo(() => new Set(filterPageIds), [filterPageIds])
   const selectedTimeSlotSet = useMemo(() => new Set(filterTimeSlots), [filterTimeSlots])
   const selectedHighlightTimeSet = useMemo(() => new Set(highlightTargetTimes), [highlightTargetTimes])
-  const allPagesSelected = pages.length > 0 && filterPageIds.length === pages.length
+  const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
+  const activePageIdSet = useMemo(() => new Set(activePages.map((page) => page.id)), [activePages])
+  const allPagesSelected = activePages.length > 0 && filterPageIds.length === activePages.length
   const highlightTimeOptions = useMemo(
     () =>
       Array.from(
         new Set(
-          pages
+          activePages
             .filter((page) => filterPageIds.length === 0 || selectedPageIdSet.has(page.id))
             .flatMap((page) => page.timeSlots)
             .filter((slot) => parseTimeSlotMinutes(slot) !== null)
         )
       ).sort((first, second) => (parseTimeSlotMinutes(first) ?? 0) - (parseTimeSlotMinutes(second) ?? 0)),
-    [filterPageIds.length, pages, selectedPageIdSet]
+    [activePages, filterPageIds.length, selectedPageIdSet]
   )
   const pageFilterLabel =
     filterPageIds.length === 0 || allPagesSelected
       ? 'All Pages'
       : filterPageIds.length === 1
-      ? pages.find((page) => page.id === filterPageIds[0])?.name ?? '1 Page'
+      ? activePages.find((page) => page.id === filterPageIds[0])?.name ?? '1 Page'
       : `${filterPageIds.length} Pages`
   const timeSlotFilterLabel =
     filterTimeSlots.length === 0 || filterTimeSlots.length === highlightTimeOptions.length
@@ -574,6 +576,7 @@ export function PostsList() {
     () =>
       posts
         .filter((post) => {
+          if (!activePageIdSet.has(post.pageId)) return false
           if (post.postDate !== getDisplayDateForTimeSlot(selectedDate, post.timeSlot)) return false
           if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
           if (filterTimeSlots.length > 0 && !selectedTimeSlotSet.has(post.timeSlot)) return false
@@ -598,6 +601,7 @@ export function PostsList() {
       filterPageIds.length,
       filterStatus,
       filterTimeSlots.length,
+      activePageIdSet,
       posts,
       searchQuery,
       selectedDate,
@@ -605,6 +609,10 @@ export function PostsList() {
       selectedTimeSlotSet,
     ]
   )
+
+  useEffect(() => {
+    setFilterPageIds((current) => current.filter((pageId) => activePageIdSet.has(pageId)))
+  }, [activePageIdSet])
 
   const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
@@ -834,7 +842,7 @@ export function PostsList() {
                   All Pages
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuSeparator className="bg-border" />
-                {pages.map((page) => (
+                {activePages.map((page) => (
                   <DropdownMenuCheckboxItem
                     key={page.id}
                     checked={selectedPageIdSet.has(page.id)}

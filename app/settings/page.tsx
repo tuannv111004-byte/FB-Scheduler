@@ -140,6 +140,8 @@ export default function SettingsPage() {
   const [ctaInput, setCtaInput] = useState('')
   const [ctaPageIds, setCtaPageIds] = useState<string[] | null>(null)
   const [isSavingCta, setIsSavingCta] = useState(false)
+  const [pendingClearCtaPageId, setPendingClearCtaPageId] = useState<string | null>(null)
+  const [replaceCtaDialogOpen, setReplaceCtaDialogOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -152,6 +154,8 @@ export default function SettingsPage() {
   const googleRestoreDisabled = !isSupabaseConfigured || isGoogleRestoring || isGoogleBackingUp || isExporting || isImporting
   const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
   const selectedCtaPages = ctaPageIds ?? activePages.map((page) => page.id)
+  const pendingClearCtaPage = activePages.find((page) => page.id === pendingClearCtaPageId)
+  const parsedCtaInput = parseCtaInput(ctaInput)
 
   const toggleCtaPage = (pageId: string, checked: boolean) => {
     setCtaPageIds((current) => {
@@ -176,7 +180,7 @@ export default function SettingsPage() {
     setIsSavingCta(true)
     try {
       await Promise.all(
-        pages
+        activePages
           .filter((page) => selectedCtaPages.includes(page.id))
           .map((page) => {
             const existing = new Set(page.ctaTemplates.map(normalizeCta))
@@ -214,7 +218,7 @@ export default function SettingsPage() {
     setIsSavingCta(true)
     try {
       await Promise.all(
-        pages
+        activePages
           .filter((page) => selectedCtaPages.includes(page.id))
           .map((page) => {
             const existing = new Set(page.ctaTemplates.map(normalizeCta))
@@ -238,6 +242,47 @@ export default function SettingsPage() {
     }
   }
 
+  const openReplaceCtaDialog = () => {
+    if (parsedCtaInput.length === 0) return
+    if (selectedCtaPages.length === 0) {
+      toast({
+        title: 'No pages selected',
+        description: 'Select at least one page before replacing CTAs.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setReplaceCtaDialogOpen(true)
+  }
+
+  const handleReplaceCtas = async () => {
+    if (parsedCtaInput.length === 0 || selectedCtaPages.length === 0) return
+
+    setIsSavingCta(true)
+    try {
+      await Promise.all(
+        activePages
+          .filter((page) => selectedCtaPages.includes(page.id))
+          .map((page) => updatePage(page.id, { ctaTemplates: parsedCtaInput }))
+      )
+      setCtaInput('')
+      setReplaceCtaDialogOpen(false)
+      toast({
+        title: parsedCtaInput.length === 1 ? 'CTA replaced' : 'CTAs replaced',
+        description: `Rewrote ${parsedCtaInput.length} CTA${parsedCtaInput.length === 1 ? '' : 's'} for ${selectedCtaPages.length} page${selectedCtaPages.length === 1 ? '' : 's'}.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Failed to replace CTAs',
+        description: error instanceof Error ? error.message : 'Could not update page CTAs.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingCta(false)
+    }
+  }
+
   const handleRemoveCta = async (pageId: string, cta: string) => {
     const page = pages.find((item) => item.id === pageId)
     if (!page) return
@@ -251,6 +296,28 @@ export default function SettingsPage() {
     } catch (error) {
       toast({
         title: 'Failed to remove CTA',
+        description: error instanceof Error ? error.message : 'Could not update page CTAs.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingCta(false)
+    }
+  }
+
+  const handleClearPageCtas = async () => {
+    if (!pendingClearCtaPage || pendingClearCtaPage.ctaTemplates.length === 0) return
+
+    setIsSavingCta(true)
+    try {
+      await updatePage(pendingClearCtaPage.id, { ctaTemplates: [] })
+      toast({
+        title: 'All CTAs removed',
+        description: `${pendingClearCtaPage.name} now has no custom CTA phrases.`,
+      })
+      setPendingClearCtaPageId(null)
+    } catch (error) {
+      toast({
+        title: 'Failed to clear CTAs',
         description: error instanceof Error ? error.message : 'Could not update page CTAs.',
         variant: 'destructive',
       })
@@ -548,24 +615,32 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                   <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-                    {pages.map((page) => (
+                    {activePages.map((page) => (
                       <label key={page.id} className="flex items-center gap-2 rounded-md border border-border/70 p-2 text-sm">
                         <Checkbox
                           checked={selectedCtaPages.includes(page.id)}
                           onCheckedChange={(checked) => toggleCtaPage(page.id, checked === true)}
                         />
                         <span className="min-w-0 flex-1 truncate">{page.name}</span>
-                        {!page.isActive && <Badge variant="secondary">Off</Badge>}
                       </label>
                     ))}
                   </div>
                   <Button
                     type="button"
                     onClick={() => void handleAddCta()}
-                    disabled={isSavingCta || parseCtaInput(ctaInput).length === 0}
+                    disabled={isSavingCta || parsedCtaInput.length === 0}
                     className="w-full"
                   >
                     {isSavingCta ? 'Saving...' : 'Add CTA'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={openReplaceCtaDialog}
+                    disabled={isSavingCta || parsedCtaInput.length === 0}
+                    className="w-full"
+                  >
+                    Replace Selected CTAs
                   </Button>
                   <Button
                     type="button"
@@ -583,7 +658,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {pages.map((page) => (
+                {activePages.map((page) => (
                   <div key={page.id} className="rounded-md border border-border p-3">
                     <div className="mb-3 flex items-center gap-2">
                       {page.logoUrl ? (
@@ -595,6 +670,18 @@ export default function SettingsPage() {
                         <p className="truncate text-sm font-medium">{page.name}</p>
                         <p className="text-xs text-muted-foreground">{page.ctaTemplates.length} CTA</p>
                       </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                        onClick={() => setPendingClearCtaPageId(page.id)}
+                        disabled={isSavingCta || page.ctaTemplates.length === 0}
+                        title="Clear all CTAs"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Clear all
+                      </Button>
                     </div>
                     <div className="space-y-2">
                       {page.ctaTemplates.length === 0 ? (
@@ -798,6 +885,43 @@ export default function SettingsPage() {
             <AlertDialogCancel disabled={isGoogleRestoring}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleGoogleRestore} disabled={isGoogleRestoring}>
               {isGoogleRestoring ? 'Restoring...' : 'Restore'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(pendingClearCtaPage)} onOpenChange={(open) => !open && setPendingClearCtaPageId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all CTAs?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove {pendingClearCtaPage?.ctaTemplates.length ?? 0} CTA
+              {(pendingClearCtaPage?.ctaTemplates.length ?? 0) === 1 ? '' : 's'} from {pendingClearCtaPage?.name}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSavingCta}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClearPageCtas} disabled={isSavingCta}>
+              {isSavingCta ? 'Clearing...' : 'Clear all'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={replaceCtaDialogOpen} onOpenChange={setReplaceCtaDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace selected CTAs?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will rewrite the CTA list for {selectedCtaPages.length} page
+              {selectedCtaPages.length === 1 ? '' : 's'} with {parsedCtaInput.length} CTA
+              {parsedCtaInput.length === 1 ? '' : 's'} from the text box.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSavingCta}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReplaceCtas} disabled={isSavingCta}>
+              {isSavingCta ? 'Replacing...' : 'Replace CTAs'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

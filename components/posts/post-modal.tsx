@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useEffect } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -261,6 +261,7 @@ export function PostModal({
     }
   }, [open])
 
+  const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
   const selectedPage = pages.find((p) => p.id === formData.pageId)
   const previewImageUrl = selectedImagePreviewUrl || formData.imageUrl.trim()
   const showImageResizeControls = selectedImageMeta?.needsAttention || Boolean(previewImageUrl)
@@ -477,7 +478,7 @@ export function PostModal({
                   <SelectValue placeholder="Select a page" />
                 </SelectTrigger>
                 <SelectContent>
-                  {pages.filter((p) => p.isActive).map((page) => (
+                  {activePages.map((page) => (
                     <SelectItem key={page.id} value={page.id}>
                       <div className="flex items-center gap-2">
                         {page.logoUrl ? (
