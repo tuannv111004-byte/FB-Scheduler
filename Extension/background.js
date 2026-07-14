@@ -272,6 +272,24 @@ function domainForNow(date = new Date()) {
   return DOMAIN_RULE[domainIndex];
 }
 
+function addVtPrefixToDailyLink(link) {
+  const value = String(link || "").trim();
+  if (!value) return "";
+
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split("/");
+    const lastIndex = parts.map((part) => Boolean(part)).lastIndexOf(true);
+    if (lastIndex === -1) return url.toString();
+    parts[lastIndex] = parts[lastIndex].replace(/^vt-*/i, "");
+    parts[lastIndex] = `vt-${parts[lastIndex]}`;
+    url.pathname = parts.join("/");
+    return url.toString();
+  } catch {
+    return value.replace(/\/(?:vt-*)?([^/?#]+)(?=([?#]|$))/i, "/vt-$1");
+  }
+}
+
 async function getOrCreateTab(url, host) {
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find((tab) => {
@@ -397,15 +415,16 @@ async function createDailyPost(tabId, item, options) {
 
 async function createFejiLink(item, dailyLink, domain) {
   const tab = await chrome.tabs.create({ url: FEJI_CREATE_URL, active: false });
+  const fejiDailyLink = addVtPrefixToDailyLink(dailyLink);
   try {
     await waitForTabComplete(tab.id);
-    await execute(tab.id, fejiFillAndSubmitScript, [item, dailyLink, domain]);
+    await execute(tab.id, fejiFillAndSubmitScript, [item, fejiDailyLink, domain]);
     await delay(2500);
     await waitForTabComplete(tab.id, 45000);
 
-    const searchUrl = `${FEJI_LIST_URL}&link=${encodeURIComponent(dailyLink)}`;
+    const searchUrl = `${FEJI_LIST_URL}&link=${encodeURIComponent(fejiDailyLink)}`;
     await navigateTab(tab.id, searchUrl);
-    const shortLink = await execute(tab.id, fejiFindShortLinkScript, [dailyLink, domain]);
+    const shortLink = await execute(tab.id, fejiFindShortLinkScript, [fejiDailyLink, domain]);
     await chrome.tabs.remove(tab.id);
     return shortLink;
   } catch (error) {
