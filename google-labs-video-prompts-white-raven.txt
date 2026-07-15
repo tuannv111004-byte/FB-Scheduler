@@ -1,0 +1,196 @@
+TITLE
+Cau Be Roi Xuong Dong Song Bang - White Raven Homestead
+
+THE LOAI
+Northern Frontier Drama - Family Conflict - Winter Survival
+
+BOI CANH
+White Raven Homestead, vung Yukon nam 1894.
+
+Mot can nha go biet lap giua rung thong phu tuyet. Ben ngoai la dem bao tuyet, gio rit qua vach go, tuyet dap vao cua so. Elias North, 68 tuoi, song cung chau trai Jonah, 15 tuoi, sau khi cha me Jonah qua doi. Elias it noi, nghiem khac, luon day Jonah cach song sot o vung bien gioi phuong Bac. Jonah thi ngay cang buc boi, muon roi khoi noi nay de theo mot doan xe hang xuong phia nam.
+
+Bi mat trung tam: Elias khong cam Jonah di chi vi so hai. Nhieu nam truoc, cha Jonah cung bo nha trong mot dem bao va bien mat gan chinh dong song bang nay. Elias chua bao gio tim thay thi the con trai minh, va ong da giau Jonah su that do.
+
+NHAN VAT
+Elias North, 68 tuoi
+Nguoi ong gia nua, mat nhieu nep nhan, doi mat sau va met moi. Ong cung ran, kiem che cam xuc, noi it nhung moi cau deu nang ne. Khi so hai, ong khong hoang loan lon tieng ma im lang, tho gap, mat rung len vi dang co giu binh tinh.
+
+Jonah North, 15 tuoi
+Cau be thieu nien buong binh, nong nay, dau kho vi cam thay bi mac ket. Cau muon duoc tu do, nhung chua hieu het su tan nhan cua mua dong phuong Bac. Dien xuat can co su tuc gian cua tuoi tre tron voi noi dau vi cam thay khong duoc yeu thuong.
+
+Mara Bell, 33 tuoi
+Nguoi dua thu bang cho keo, ranh roi dia hinh, binh tinh va manh me. Co xuat hien nhu tia hy vong cuoi cung trong dem bao.
+
+STYLE CHUNG CHO TAT CA CLIP
+Realistic cinematic 1894 Northern frontier winter drama, Yukon wilderness, isolated log cabin, pine forest, snowstorm, oil lamp light, period-accurate wool clothing, natural human movement, realistic faces, visible cold breath, wind-driven snow, emotionally restrained acting, smooth stabilized camera movement, continuous shot, no modern objects.
+
+NEGATIVE PROMPT CHUNG
+cartoon, anime, illustration, CGI, 3D render, plastic skin, glossy fake skin, over-smoothed face, distorted hands, extra fingers, bad anatomy, morphing face, flickering, jitter, unstable motion, blurry face, modern clothing, modern buildings, fantasy armor, unrealistic snow, low quality, exaggerated action, fake emotions
+
+------------------------------------------------------------
+CLIP 1 - CAI NHAU TRONG CAN NHA GO
+THOI LUONG: 8 giay
+
+NOI DUNG CANH
+Ben trong can nha go White Raven vao dem. Anh lua bep va den dau leo let. Jonah dung gan cua, mac ao khoac len, tay nam chat chiec khan. Elias dung gan ban go, mat lanh nhung doi mat lo lang. Hai ong chau cai nhau ve viec Jonah muon roi khoi White Raven.
+
+LOI THOAI
+Jonah: "Chau se di voi doan xe hang. Chau khong the chet gia o noi nay nhu ong duoc."
+Elias: "Con chua du suc song sot ngoai kia."
+Jonah: "Khong. Ong chi muon giu chau lai de chau cung co doc nhu ong."
+Elias: "Jonah, dung mo canh cua do."
+Jonah: "Ong chua bao gio that su yeu chau."
+
+DIEN XUAT
+Jonah noi nhanh, giong run vi tuc gian, mat do len, co gang khong khoc. Elias ban dau giu mat lanh, nhung khi nghe cau "ong chua bao gio yeu chau", ong suyt vo ra, moi he mo nhu muon noi that nhung lai nuot xuong.
+
+CAMERA
+Smooth slow handheld camera, bat dau o goc rong thay ca hai nguoi, roi di chuyen nhe quanh ban go, ket bang can canh mat Elias khi Jonah lao ra cua.
+
+PROMPT GOOGLE LABS
+A realistic cinematic video inside an isolated 1894 Yukon log cabin at night. Elias North, a stern 68-year-old frontier grandfather, argues with Jonah, his angry 15-year-old grandson, near an oil lamp and a wood stove. Snow hits the dark window outside. Jonah clutches a wool scarf and shouts with hurt teenage anger, while Elias hides fear behind a rigid expression. Warm firelight, cold shadows, period-accurate clothing, natural emotional acting, smooth slow handheld camera circling slightly around them, continuous shot, no cuts.
+
+------------------------------------------------------------
+CLIP 2 - JONAH BO CHAY RA DEM BAO
+THOI LUONG: 6 giay
+
+NOI DUNG CANH
+Jonah day manh cua go va chay ra ngoai. Gio tuyet dap vao mat cau. Anh sang am tu cabin lui dan phia sau, con phia truoc la rung thong toi den.
+
+LOI THOAI
+Jonah: "Chau khong can ong nua!"
+Elias, tu trong nha: "Jonah! Quay lai!"
+
+DIEN XUAT
+Jonah vua tuc gian vua so, chay nhu muon chung minh minh da lon. Cau ngoai lai mot lan rat nhanh nhung khong dung. Elias khong chay kip ra cua, giong ong vo di vi hoang so.
+
+CAMERA
+Smooth tracking shot tu phia sau Jonah, ngang tam vai. Camera theo cau bang chuyen dong on dinh, tuyet bay qua ong kinh.
+
+PROMPT GOOGLE LABS
+A realistic cinematic video of Jonah, a 15-year-old frontier boy in 1894 Yukon winter clothing, bursting out of a lonely log cabin into a violent nighttime snowstorm. He runs into a dark pine forest, angry and scared, his wool scarf whipping in the wind. Warm cabin light fades behind him. Smooth stabilized tracking camera from behind at shoulder height, snow flying past the lens, realistic running motion, visible cold breath, continuous shot.
+
+------------------------------------------------------------
+CLIP 3 - MAT BANG NUT VO
+THOI LUONG: 6 giay
+
+NOI DUNG CANH
+Jonah chay qua mot khoang trang phu tuyet, khong nhan ra ben duoi la lop bang mong tren dong song. Tieng nut vang len. Cau dung lai, mat tai di. Cac duong nut lan ra duoi chan.
+
+LOI THOAI
+Jonah, thi tham hoang loan: "Khong... khong..."
+
+DIEN XUAT
+Cau dang chay thi khung nguoi cung lai. Mat cau chuyen tu tuc gian sang so hai thuan khiet. Hai tay dua ra giu thang bang, chan lui mot buoc nhung qua muon.
+
+CAMERA
+Low angle gan mat bang, camera push-in cham vao doi giay va duong nut. Chuyen dong mem, cang thang.
+
+PROMPT GOOGLE LABS
+A realistic cinematic nighttime video in a frozen Yukon forest. Jonah runs across what looks like a snow-covered clearing, not realizing it is thin ice over a fast river. The ice suddenly cracks beneath his boots, sharp lines spreading outward. He freezes in panic, arms raised for balance, fear replacing anger on his face. Smooth low-angle push-in near the ice surface, wind-blown snow, realistic cracking ice, dark water visible below.
+
+------------------------------------------------------------
+CLIP 4 - ROI XUONG DONG SONG BANG
+THOI LUONG: 6 giay
+
+NOI DUNG CANH
+Bang sap xuong. Jonah roi vao lan nuoc den lanh buot. Cau bam vao mep bang vo, co gang keu cuu nhung gio va dong nuoc nuot mat tieng.
+
+LOI THOAI
+Jonah: "Ong oi! Cuu chau!"
+
+DIEN XUAT
+Jonah hoang loan that su, mat tai xanh, tho dut quang. Tay cau truot tren mep bang, mong tay cao vao tuyet dong cung. Khong can qua hanh dong, phai that va dau don.
+
+CAMERA
+Camera o sat mat bang, thay mat Jonah ngang voi mep nuoc. Nen giu shot lien tuc, khong cat nhanh.
+
+PROMPT GOOGLE LABS
+A realistic cinematic video of Jonah falling through broken river ice into freezing black water during a Yukon snowstorm at night. His hands grab the jagged ice edge, his face shocked and terrified, breath turning to mist, water rushing beneath the ice. Smooth low camera near the ice surface, close but steady, natural splashing, realistic survival panic, continuous shot, no exaggerated action.
+
+------------------------------------------------------------
+CLIP 5 - ELIAS TIM THAY CHIEC KHAN
+THOI LUONG: 7 giay
+
+NOI DUNG CANH
+Elias lan theo dau chan cua Jonah toi bo song. Ong cam den bao, tho gap. Anh den quet qua mat bang vo va chiec khan len cua Jonah mac tren mep bang.
+
+LOI THOAI
+Elias, rat nho: "Khong... khong phai lan nua."
+Elias, het len: "Jonah!"
+
+DIEN XUAT
+Elias quy xuong trong tuyet. Ve mat cung ran sup do trong mot khoanh khac. Cau "khong phai lan nua" phai nhu bi ep ra khoi nguc, tiet lo noi so cu ve cai chet cua con trai.
+
+CAMERA
+Smooth slow push-in tu sau lung Elias toi chiec khan tren bang, roi len mat ong.
+
+PROMPT GOOGLE LABS
+A realistic cinematic video of Elias North, a 68-year-old frontier grandfather, following footprints through deep snow to the edge of a frozen river at night. He kneels and sees Jonah's wool scarf caught on broken ice. His stern face collapses into fear as he whispers in grief. Pine trees bend in the storm behind him, lantern light flickering, visible cold breath, smooth slow push-in, emotional realism, no dialogue subtitles.
+
+------------------------------------------------------------
+CLIP 6 - ELIAS BUOC DAY VA BO RA MAT BANG
+THOI LUONG: 8 giay
+
+NOI DUNG CANH
+Elias buoc day thung quanh eo, dau kia cot vao than cay gan bo song. Ong bo ra mat bang bang ca hai tay, rat cham, moi dong tac deu co the lam bang vo them. Ong voi ve phia ho bang noi Jonah roi xuong.
+
+LOI THOAI
+Elias: "Giu lay tieng cua ong, Jonah. Dung buon tay."
+Jonah, tu duoi nuoc xa xa: "Chau lanh qua..."
+Elias: "Nhin ong. Nghe ong. Con se ve nha."
+
+DIEN XUAT
+Elias so nhung khong cho phep minh dung lai. Giong ong thap, ra lenh de giu Jonah tinh tao, nhung trong mat la noi khiep so. Ong run vi lanh va tuoi gia, khong phai vi yeu duoi.
+
+CAMERA
+Low tracking shot song song voi Elias tren mat bang. Camera chuyen dong rat cham, de cam giac nguy hiem ro rang.
+
+PROMPT GOOGLE LABS
+A realistic cinematic video of Elias tying a rope around his waist and crawling carefully across cracking river ice during a violent Yukon snowstorm at night. He holds a lantern low and reaches toward a hole in the ice, calling to Jonah to stay awake. The ice flexes and groans beneath him. Smooth low tracking shot beside him, tense winter survival drama, realistic elderly movement, period-accurate wool clothing, visible cold breath.
+
+------------------------------------------------------------
+CLIP 7 - VONG CO DUOI LOP BANG
+THOI LUONG: 6 giay
+
+NOI DUNG CANH
+Duoi lop bang, Jonah bi dong nuoc keo xuong. Trong lan nuoc toi, cau thay mot chiec vong co cu ket duoi bang. No giong het mon do cua cha cau. Khoanh khac nay lam cau choang vang.
+
+LOI THOAI
+Jonah, nghet trong nuoc, gan nhu khong thanh tieng: "Cha...?"
+
+DIEN XUAT
+Jonah khong hieu noi, vua so chet vua bi cuon vao phat hien. Mat cau mo to, bong hoang, bong bong khi tho thoat ra cham.
+
+CAMERA
+Underwater slow drift. Anh den long va trang moonlight le loi xuyen qua lop bang. Khong lam ao dieu, phai lanh, that, den va dang so.
+
+PROMPT GOOGLE LABS
+A realistic cinematic underwater view beneath frozen river ice at night. Jonah, a terrified 15-year-old boy, struggles in freezing dark water and sees a small old necklace caught beneath the ice, the same kind his missing father once wore. Faint lantern light and moonlight shimmer through cracked ice above. Slow natural underwater camera drift, realistic bubbles, cold blue darkness, emotional mystery, no fantasy glow.
+
+------------------------------------------------------------
+CLIP 8 - MARA BELL THAY TIN HIEU
+THOI LUONG: 7 giay
+
+NOI DUNG CANH
+Mara Bell lai xe cho keo qua rung tuyet gan White Raven. Co thay anh den bao nhap nhay gan bo song, biet co chuyen khong on. Co quay cho keo huong ve phia song.
+
+LOI THOAI
+Mara: "Hyah! Ve phia anh den!"
+
+DIEN XUAT
+Mara tap trung, nhanh tri, khong hoang loan. Anh mat co sac lanh cua nguoi quen song sot ngoai bien gioi.
+
+CAMERA
+Smooth tracking shot ngang voi xe cho keo. Den treo lac nhe, tuyet bay day khung hinh, chuyen dong nhanh nhung khong giat.
+
+PROMPT GOOGLE LABS
+A realistic cinematic video of Mara Bell, a 33-year-old mail carrier with a dog sled, moving through a Yukon snowstorm near White Raven Homestead at night. She notices a distant emergency lantern signal near the frozen river and turns sharply toward it. Her sled dogs pull through deep snow, lanterns swinging, period-accurate winter gear, urgent but realistic motion, smooth tracking camera, no modern objects.
+
+------------------------------------------------------------
+GOI Y DUNG VOI GOOGLE LABS
+Moi clip nen tao rieng, thoi luong 6 den 8 giay.
+Hay giu nguyen mo ta nhan vat Elias, Jonah, Mara trong cac clip neu muon khuon mat va trang phuc on dinh hon.
+Neu clip bi giat, hay them cac cum: smooth stabilized camera, continuous shot, natural motion, no cuts.
+Neu clip bi gia CGI, them: realistic skin texture, practical lighting, period-accurate clothing, real camera footage.
+Neu mat nhan vat bi meo, hay giam hanh dong phuc tap va dung canh cham hon nhu slow push-in, kneeling, turning head, crawling slowly.
