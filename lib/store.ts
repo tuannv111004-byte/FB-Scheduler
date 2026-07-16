@@ -29,7 +29,7 @@ interface AppState {
   updatePage: (id: string, updates: Partial<PageInput>) => Promise<void>
   deletePage: (id: string) => Promise<void>
   togglePageActive: (id: string) => Promise<void>
-  addPost: (post: PostInput) => Promise<void>
+  addPost: (post: PostInput) => Promise<Post>
   updatePost: (id: string, updates: Partial<PostInput>) => Promise<void>
   deletePost: (id: string) => Promise<void>
   deletePosts: (ids: string[]) => Promise<void>
@@ -271,6 +271,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
         isSyncing: false,
       }))
+      return newPost
     } catch (error) {
       set({ isSyncing: false })
       throw error

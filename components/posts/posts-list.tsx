@@ -51,6 +51,9 @@ import {
   ExternalLink,
   Search,
   ChevronDown,
+  Video,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/status-badge'
 import { PostModal } from './post-modal'
@@ -58,6 +61,13 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import type { FacebookPage, Post, PostStatus } from '@/lib/types'
+import {
+  getGoogleDriveThumbnailUrl,
+  isGoogleDriveUrl,
+  isMediaUploadErrorPath,
+  isUploadingMediaPath,
+  isVideoUrl,
+} from '@/lib/media-utils'
 
 const copyableImageType = 'image/png'
 const targetImageWidth = 1080
@@ -1036,7 +1046,7 @@ export function PostsList() {
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground w-16">Image</TableHead>
+                  <TableHead className="text-muted-foreground w-16">Media</TableHead>
                   <TableHead className="text-muted-foreground">Page</TableHead>
                   <TableHead className="text-muted-foreground">Time</TableHead>
                   <TableHead className="text-muted-foreground">Caption</TableHead>
@@ -1056,6 +1066,10 @@ export function PostsList() {
                   filteredPosts.map((post) => {
                     const timeHighlightState = getTimeHighlightState(post)
                     const isTimeHighlighted = timeHighlightState !== null
+                    const rowPage = getPageById(post.pageId)
+                    const rowHasVideo = rowPage?.mediaType === 'video' || isVideoUrl(post.imageUrl)
+                    const rowIsUploading = isUploadingMediaPath(post.imagePath)
+                    const rowUploadFailed = isMediaUploadErrorPath(post.imagePath)
 
                     return (
                     <TableRow
@@ -1067,16 +1081,35 @@ export function PostsList() {
                       }`}
                     >
                       <TableCell>
-                        {post.imageUrl ? (
+                        {rowIsUploading ? (
+                          <div
+                            className="flex h-10 w-10 items-center justify-center rounded bg-primary/10"
+                            title="Uploading video to Google Drive"
+                          >
+                            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                          </div>
+                        ) : rowUploadFailed ? (
+                          <div
+                            className="flex h-10 w-10 items-center justify-center rounded bg-destructive/10"
+                            title="Video upload failed"
+                          >
+                            <AlertTriangle className="h-5 w-5 text-destructive" />
+                          </div>
+                        ) : post.imageUrl ? (
                           <button
                             type="button"
                             onClick={() => {
                               setHighlightedPostId(post.id)
-                              void copyImage(post.imageUrl!)
+                              if (rowHasVideo) {
+                                void copyText(post.imageUrl!, 'Video URL')
+                              } else {
+                                void copyImage(post.imageUrl!)
+                              }
                             }}
                             className="block overflow-hidden rounded"
                             onMouseEnter={(event) => {
                               if (!zoomImagesOnHover) return
+                              if (rowHasVideo) return
                               const rect = event.currentTarget.getBoundingClientRect()
                               const previewWidth = 340
                               setHoveredImage({
@@ -1086,13 +1119,40 @@ export function PostsList() {
                               })
                             }}
                             onMouseLeave={() => setHoveredImage(null)}
-                            title="Click to copy image"
+                            title={rowHasVideo ? 'Click to copy video URL' : 'Click to copy image'}
                           >
-                            <img
-                              src={post.imageUrl}
-                              alt=""
-                              className="h-10 w-10 rounded object-cover"
-                            />
+                            {rowHasVideo ? (
+                              <div className="relative h-10 w-10 overflow-hidden rounded bg-black">
+                                {getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl) ? (
+                                  <img
+                                    src={getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl)}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : !isGoogleDriveUrl(post.imageUrl) ? (
+                                  <video
+                                    src={post.imageUrl}
+                                    className="h-full w-full object-cover"
+                                    muted
+                                    playsInline
+                                    preload="metadata"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center">
+                                    <Video className="h-4 w-4 text-white drop-shadow" />
+                                  </div>
+                                )}
+                                <div className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1 text-[8px] font-medium text-white">
+                                  VID
+                                </div>
+                              </div>
+                            ) : (
+                              <img
+                                src={post.imageUrl}
+                                alt=""
+                                className="h-10 w-10 rounded object-cover"
+                              />
+                            )}
                           </button>
                         ) : (
                           <div className="flex h-10 w-10 items-center justify-center rounded bg-secondary">
@@ -1102,7 +1162,7 @@ export function PostsList() {
                       </TableCell>
                       <TableCell>
                         {(() => {
-                          const page = getPageById(post.pageId)
+                          const page = rowPage
                           return (
                             <div className="flex items-center gap-2">
                               {page?.logoUrl ? (

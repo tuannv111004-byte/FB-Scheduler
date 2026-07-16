@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -13,10 +14,17 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { X, Plus } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
 import { uploadPageLogoImage } from '@/lib/supabase'
-import type { FacebookPage } from '@/lib/types'
+import type { FacebookPage, PageInput } from '@/lib/types'
 
 const defaultBrandColor = '#14b8a6'
 const defaultTimeSlots = ['08:00', '15:00', '20:00', '23:00', '02:00']
@@ -203,7 +211,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
   const [selectedLogoFile, setSelectedLogoFile] = useState<File | null>(null)
   const [logoPreviewUrl, setLogoPreviewUrl] = useState('')
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<PageInput>({
     name: '',
     pageUrl: '',
     logoUrl: '',
@@ -212,6 +220,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
     postsPerDay: 5,
     timeSlots: defaultTimeSlots,
     ctaTemplates: [],
+    mediaType: 'image',
     notes: '',
   })
 
@@ -228,6 +237,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
         postsPerDay: page.postsPerDay,
         timeSlots: [...page.timeSlots],
         ctaTemplates: [...page.ctaTemplates],
+        mediaType: page.mediaType === 'video' ? 'video' : 'image',
         notes: page.notes,
       })
     } else {
@@ -240,6 +250,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
         postsPerDay: 5,
         timeSlots: defaultTimeSlots,
         ctaTemplates: [],
+        mediaType: 'image',
         notes: '',
       })
     }
@@ -268,7 +279,7 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
   useEffect(() => {
     if (!open) return
 
-    const normalizedLogoUrl = (logoPreviewUrl || formData.logoUrl).trim()
+    const normalizedLogoUrl = (logoPreviewUrl || formData.logoUrl || '').trim()
     if (!normalizedLogoUrl) return
     if (normalizedLogoUrl === lastDetectedLogoUrl) return
 
@@ -347,9 +358,12 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg bg-card border-border">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg bg-card border-border">
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Edit Page' : 'Add New Page'}</DialogTitle>
+          <DialogDescription>
+            Configure the page identity, schedule, and whether posts use images or videos.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -473,6 +487,27 @@ export function PageModal({ open, onOpenChange, page }: PageModalProps) {
               checked={formData.isActive}
               onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, isActive: checked }))}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="mediaType">Post Media Type</Label>
+            <Select
+              value={formData.mediaType}
+              onValueChange={(value) =>
+                setFormData((prev) => ({ ...prev, mediaType: value === 'video' ? 'video' : 'image' }))
+              }
+            >
+              <SelectTrigger id="mediaType">
+                <SelectValue placeholder="Select media type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="image">Image page</SelectItem>
+                <SelectItem value="video">Video page</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Video pages upload post media to Google Drive and keep the caption/schedule in the post.
+            </p>
           </div>
 
           <div className="space-y-2">

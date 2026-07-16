@@ -1,3 +1,5 @@
+export type PageMediaType = 'image' | 'video'
+
 export type PostStatus = 
   | 'draft' 
   | 'scheduled' 
@@ -16,6 +18,7 @@ export interface PageInput {
   postsPerDay: number
   timeSlots: string[]
   ctaTemplates: string[]
+  mediaType: PageMediaType
   notes: string
 }
 

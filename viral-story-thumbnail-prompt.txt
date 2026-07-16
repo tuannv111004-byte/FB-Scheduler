@@ -106,6 +106,8 @@ During Step 1:
 - Do not include camera/lens jargon unless it is necessary to describe the direction.
 - Do not write a final polished prompt.
 - Do not suggest headline text.
+- Do not propose literal metaphor props such as real hornet nests, insects, cages, symbolic animals, fantasy icons, or decorative symbols unless they are actually in the original story.
+- If using a metaphor in a direction, say it is a mood or composition metaphor only, not a physical object to include.
 - Only give 10 clear creative directions so the user can choose.
 
 Each direction must include:
@@ -177,6 +179,7 @@ The final prompt must include:
 - Background and supporting scene details.
 - Textless composition instructions.
 - Clear visual storytelling device instead of headline text.
+- A clear instruction that metaphorical language must be translated into mood, lighting, blocking, and pressure, not literal symbolic props.
 - Overall cinematic story-thumbnail style.
 - Negative constraints.
 
@@ -187,6 +190,7 @@ The final prompt must explicitly demand:
 - balanced foreground, mid-ground, and background
 - clear single emotional hook
 - one visible clue or threat
+- no literal metaphor objects unless they exist in the original story
 - realistic human anatomy and facial expression
 - no text or typography anywhere in the image
 - precise spatial blocking with no confusing side-by-side protection pose
@@ -335,6 +339,32 @@ Choose ONE edit style based on the selected direction:
 - Any paper or screen must be unreadable, using abstract lines, blurred markings, or a visual photo-like clue instead of legible words.
 
 ==================================================
+METAPHOR AND SYMBOL RULE:
+==================================================
+If the story direction uses a metaphor, idiom, or symbolic phrase, do not turn it into a literal object unless that object truly exists in the original story or the user explicitly asks for it.
+
+For example:
+- If the direction says a situation feels like "a hornet's nest," do not add a real hornet nest, insects, honeycomb, swarm, or hive.
+- If the direction says someone is "trapped like prey," do not add cages, predators, or animal imagery unless present in the story.
+- If the direction says "the walls are closing in," do not distort walls or create fantasy architecture.
+- If the direction says "a storm is coming," use tension, lighting, posture, clouds, or approaching figures only if appropriate, not magical storm symbols.
+
+Translate metaphors into cinematic feeling through:
+- facial expression
+- body tension
+- lighting pressure
+- blocked escape routes
+- surrounding figures
+- threatening silhouettes
+- repeated shapes in the environment
+- foreground/background compression
+- a historically accurate clue already grounded in the story
+
+When writing thumbnail directions, clearly label symbolic ideas as metaphorical mood only, not literal props.
+When writing the final prompt, include only physical objects that belong naturally in the story world.
+Avoid accidental literal symbols, random animals, insects, nests, fantasy icons, or decorative objects that were not in the original story.
+
+==================================================
 TEXTLESS VISUAL STORYTELLING
 ==================================================
 
@@ -399,6 +429,8 @@ Avoid:
 - CGI look
 - fake plastic skin
 - beauty filter
+- literal metaphor props
+- random insects, nests, hives, symbolic animals, fantasy icons, or decorative symbols not present in the original story
 - distorted faces
 - extra limbs
 - random duplicated people

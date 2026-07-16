@@ -21,10 +21,20 @@ import {
   ChevronDown,
   Calendar,
   GripVertical,
+  Video,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/status-badge'
 import { PostModal } from '@/components/posts/post-modal'
 import { cn } from '@/lib/utils'
+import {
+  getGoogleDriveThumbnailUrl,
+  isGoogleDriveUrl,
+  isMediaUploadErrorPath,
+  isUploadingMediaPath,
+  isVideoUrl,
+} from '@/lib/media-utils'
 import { format, addDays, subDays } from 'date-fns'
 import type { Post } from '@/lib/types'
 
@@ -907,12 +917,53 @@ export function ScheduleBoard() {
                               title="Drag to move this post"
                             >
                               <div className="flex items-start gap-2">
-                                {post.imageUrl ? (
-                                  <img
-                                    src={post.imageUrl}
-                                    alt=""
-                                    className="h-10 w-10 rounded object-cover shrink-0"
-                                  />
+                                {isUploadingMediaPath(post.imagePath) ? (
+                                  <div
+                                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-primary/10"
+                                    title="Uploading video to Google Drive"
+                                  >
+                                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                  </div>
+                                ) : isMediaUploadErrorPath(post.imagePath) ? (
+                                  <div
+                                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-destructive/10"
+                                    title="Video upload failed"
+                                  >
+                                    <AlertTriangle className="h-4 w-4 text-destructive" />
+                                  </div>
+                                ) : post.imageUrl ? (
+                                  page.mediaType === 'video' || isVideoUrl(post.imageUrl) ? (
+                                    <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded bg-black">
+                                      {getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl) ? (
+                                        <img
+                                          src={getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl)}
+                                          alt=""
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : !isGoogleDriveUrl(post.imageUrl) ? (
+                                        <video
+                                          src={post.imageUrl}
+                                          className="h-full w-full object-cover"
+                                          muted
+                                          playsInline
+                                          preload="metadata"
+                                        />
+                                      ) : (
+                                        <div className="flex h-full w-full items-center justify-center">
+                                          <Video className="h-4 w-4 text-white drop-shadow" />
+                                        </div>
+                                      )}
+                                      <div className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1 text-[8px] font-medium text-white">
+                                        VID
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <img
+                                      src={post.imageUrl}
+                                      alt=""
+                                      className="h-10 w-10 rounded object-cover shrink-0"
+                                    />
+                                  )
                                 ) : (
                                   <div className="flex h-10 w-10 items-center justify-center rounded bg-secondary shrink-0">
                                     <ImageIcon className="h-4 w-4 text-muted-foreground" />

@@ -6,7 +6,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  allowedDevOrigins: ['192.168.1.15','192.168.1.88'],
+  experimental: {
+    proxyClientMaxBodySize: '250mb',
+  },
+  allowedDevOrigins: ['192.168.1.15', '192.168.1.88'],
 }
 
 export default nextConfig

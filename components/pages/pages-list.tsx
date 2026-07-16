@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -37,7 +38,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/lib/store'
-import { Clock, Plus, MoreHorizontal, Pencil, Trash2, ExternalLink, Power, PowerOff, GripVertical, X } from 'lucide-react'
+import {
+  Clock,
+  Plus,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  Power,
+  PowerOff,
+  GripVertical,
+  X,
+  Image as ImageIcon,
+  Video,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageModal } from './page-modal'
 import type { FacebookPage } from '@/lib/types'
@@ -300,6 +314,11 @@ export function PagesList() {
                             className="inline-flex h-3 w-3 rounded-full border border-white/30"
                             style={{ backgroundColor: page.brandColor }}
                           />
+                          {page.mediaType === 'video' && (
+                            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">
+                              Video
+                            </span>
+                          )}
                         </div>
                         <a
                           href={page.pageUrl}
@@ -358,6 +377,25 @@ export function PagesList() {
                           <Pencil className="h-4 w-4 mr-2" />
                           Edit
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            void updatePage(page.id, {
+                              mediaType: page.mediaType === 'video' ? 'image' : 'video',
+                            })
+                          }
+                        >
+                          {page.mediaType === 'video' ? (
+                            <>
+                              <ImageIcon className="h-4 w-4 mr-2" />
+                              Set as Image Page
+                            </>
+                          ) : (
+                            <>
+                              <Video className="h-4 w-4 mr-2" />
+                              Set as Video Page
+                            </>
+                          )}
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => togglePageActive(page.id)}>
                           {page.isActive ? (
                             <>
@@ -395,6 +433,9 @@ export function PagesList() {
         <DialogContent className="bg-card border-border">
           <DialogHeader>
             <DialogTitle>Sync Time Slots</DialogTitle>
+            <DialogDescription>
+              Apply the same daily time slots to every page.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">

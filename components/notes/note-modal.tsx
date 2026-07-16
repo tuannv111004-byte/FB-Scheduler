@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -53,6 +54,9 @@ export function NoteModal({ open, onOpenChange, note, isSaving, onSave }: NoteMo
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl bg-card border-border">
         <DialogHeader>
           <DialogTitle>{note ? 'Edit Note' : 'New Note'}</DialogTitle>
+          <DialogDescription>
+            Save a note for reminders, drafts, or workflow details.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">

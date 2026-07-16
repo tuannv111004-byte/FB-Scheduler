@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAppStore } from '@/lib/store'
+import { toast } from '@/hooks/use-toast'
 import { isSupabaseConfigured, uploadPostImage } from '@/lib/supabase'
 import {
   clampFocusValue,
@@ -38,6 +39,15 @@ import {
   extractZipArchiveImages,
   type ExtractedArchiveImage,
 } from '@/lib/bulk-archive-scheduling'
+import {
+  isImageFile,
+  isGoogleDriveUrl,
+  isVideoFile,
+  isVideoUrl,
+  getGoogleDrivePreviewUrl,
+  uploadErrorMediaPath,
+  uploadingMediaPath,
+} from '@/lib/media-utils'
 import type { Post, PostStatus } from '@/lib/types'
 import { Archive } from 'lucide-react'
 
@@ -73,6 +83,10 @@ function isImageUrl(url: URL) {
   return /\.(avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(url.href)
 }
 
+function isVideoMediaUrl(url: URL) {
+  return isVideoUrl(url.href)
+}
+
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) {
     return `${Math.ceil(bytes / 1024)} KB`
@@ -93,6 +107,58 @@ async function readExtractArchiveResponse(response: Response) {
     const fallbackMessage = responseText.trim() || response.statusText || 'Failed to extract archive.'
     throw new Error(fallbackMessage)
   }
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      const [, base64 = ''] = result.split(',')
+      if (!base64) {
+        reject(new Error('Could not read video file.'))
+        return
+      }
+      resolve(base64)
+    }
+    reader.onerror = () => reject(new Error('Could not read video file.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function uploadMediaToGoogleDrive(file: File) {
+  const base64 = await fileToBase64(file)
+
+  const response = await fetch('/api/google/media/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      base64,
+    }),
+  })
+  const result = await response.json().catch(() => null) as {
+    ok?: boolean
+    error?: string
+    media?: {
+      drive_file_id?: string
+      web_view_link?: string
+      direct_url?: string
+      image_path?: string
+      image_url?: string
+    }
+  } | null
+
+  if (!response.ok || !result?.ok || !result.media) {
+    throw new Error(result?.error || 'Could not upload media to Google Drive.')
+  }
+
+  return result.media
+}
+
+function driveViewLinkFromFileId(fileId?: string) {
+  return fileId ? `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view` : ''
 }
 
 function getArchiveExtension(fileName: string) {
@@ -204,12 +270,36 @@ export function PostModal({
     }
   }, [selectedFile])
 
+  const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
+  const selectedPage = pages.find((p) => p.id === formData.pageId)
+  const isVideoPage = selectedPage?.mediaType === 'video'
+  const previewImageUrl = selectedImagePreviewUrl || formData.imageUrl.trim()
+  const previewVideoUrl = selectedFile && isVideoFile(selectedFile)
+    ? selectedImagePreviewUrl
+    : isVideoPage && formData.imageUrl.trim() && !isGoogleDriveUrl(formData.imageUrl)
+      ? formData.imageUrl.trim()
+      : isVideoUrl(formData.imageUrl)
+      ? formData.imageUrl.trim()
+      : ''
+  const driveVideoPreviewUrl = isVideoPage
+    ? getGoogleDrivePreviewUrl(post?.imagePath, formData.imageUrl)
+    : ''
+  const showImageResizeControls =
+    !isVideoPage && (selectedImageMeta?.needsAttention || Boolean(previewImageUrl))
+  const canBulkSchedule =
+    !isEditing &&
+    isSupabaseConfigured &&
+    Boolean(formData.pageId && formData.postDate && formData.timeSlot)
+
   useEffect(() => {
     if (!open) return
 
     const handlePaste = async (event: ClipboardEvent) => {
       const imageFile = extractImageFileFromClipboard(event)
-      if (imageFile) {
+      const selectedPastePage = pages.find((page) => page.id === formData.pageId)
+      const isSelectedVideoPage = selectedPastePage?.mediaType === 'video'
+
+      if (imageFile && !isSelectedVideoPage) {
         event.preventDefault()
         setErrorMessage('')
         setSelectedFile(imageFile)
@@ -232,7 +322,7 @@ export function PostModal({
       event.preventDefault()
       setErrorMessage('')
 
-      if (pastedUrl && isImageUrl(pastedUrl)) {
+      if (pastedUrl && !isSelectedVideoPage && isImageUrl(pastedUrl)) {
         const imageUrl = pastedUrl.href
         setSelectedFile(null)
         setSelectedImageMeta(null)
@@ -244,6 +334,13 @@ export function PostModal({
         } catch {
           setSelectedImageMeta(null)
         }
+        return
+      }
+
+      if (pastedUrl && isSelectedVideoPage && isVideoMediaUrl(pastedUrl)) {
+        setSelectedFile(null)
+        setSelectedImageMeta(null)
+        setFormData((prev) => ({ ...prev, imageUrl: pastedUrl.href }))
         return
       }
 
@@ -259,16 +356,7 @@ export function PostModal({
     return () => {
       window.removeEventListener('paste', handlePaste)
     }
-  }, [open])
-
-  const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
-  const selectedPage = pages.find((p) => p.id === formData.pageId)
-  const previewImageUrl = selectedImagePreviewUrl || formData.imageUrl.trim()
-  const showImageResizeControls = selectedImageMeta?.needsAttention || Boolean(previewImageUrl)
-  const canBulkSchedule =
-    !isEditing &&
-    isSupabaseConfigured &&
-    Boolean(formData.pageId && formData.postDate && formData.timeSlot)
+  }, [formData.pageId, open, pages])
 
   const updateImageFocusFromPointerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!cropDragStartRef.current) return
@@ -291,6 +379,66 @@ export function PostModal({
     setErrorMessage('')
 
     try {
+      const isVideoUpload = isVideoPage && selectedFile && isVideoFile(selectedFile)
+      if (isVideoUpload) {
+        const videoFile = selectedFile
+        const pendingPayload = {
+          ...formData,
+          imagePath: uploadingMediaPath(),
+          imageUrl: undefined,
+        }
+
+        onOpenChange(false)
+
+        let targetPostId = post?.id ?? ''
+        if (isEditing && post) {
+          await updatePost(post.id, pendingPayload)
+        } else {
+          const createdPost = await addPost(pendingPayload)
+          targetPostId = createdPost.id
+        }
+
+        try {
+          const uploadedMedia = await uploadMediaToGoogleDrive(videoFile)
+          const driveFileId = uploadedMedia.drive_file_id ?? ''
+          const driveViewLink =
+            uploadedMedia.web_view_link ||
+            driveViewLinkFromFileId(driveFileId) ||
+            uploadedMedia.direct_url ||
+            uploadedMedia.image_url ||
+            ''
+          const drivePath = uploadedMedia.image_path || (driveFileId ? `drive:${driveFileId}` : '')
+
+          try {
+            await updatePost(targetPostId, {
+              imagePath: drivePath,
+              imageUrl: driveViewLink,
+            })
+            toast({
+              title: 'Video uploaded',
+              description: 'Google Drive video was saved to the post.',
+            })
+          } catch (updateError) {
+            console.error('Video uploaded to Drive but post update failed:', updateError)
+            toast({
+              title: 'Video uploaded, post not updated',
+              description: updateError instanceof Error ? updateError.message : 'Could not save the Drive link to this post.',
+              variant: 'destructive',
+            })
+          }
+        } catch (uploadError) {
+          await updatePost(targetPostId, {
+            imagePath: uploadErrorMediaPath(),
+            imageUrl: undefined,
+            notes: formData.notes
+              ? `${formData.notes}\nVideo upload failed: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`
+              : `Video upload failed: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`,
+          })
+        }
+
+        return
+      }
+
       let nextImageUrl = formData.imageUrl
       let nextImagePath = post?.imagePath ?? ''
 
@@ -299,16 +447,24 @@ export function PostModal({
       }
 
       if (selectedFile) {
-        const normalizedFile = await normalizeImageFile(
-          selectedFile,
-          imageFitMode,
-          imageFocus,
-          selectedFile.name
-        )
-        const uploadedImage = await uploadPostImage(normalizedFile)
-        nextImagePath = uploadedImage.imagePath
-        nextImageUrl = uploadedImage.imageUrl
-      } else if (nextImageUrl.trim() && isSupabaseConfigured) {
+        if (isVideoPage) {
+          throw new Error('This page is set to video posts. Choose a video file.')
+        } else {
+          if (!isImageFile(selectedFile)) {
+            throw new Error('This page is set to image posts. Choose an image file.')
+          }
+
+          const normalizedFile = await normalizeImageFile(
+            selectedFile,
+            imageFitMode,
+            imageFocus,
+            selectedFile.name
+          )
+          const uploadedImage = await uploadPostImage(normalizedFile)
+          nextImagePath = uploadedImage.imagePath
+          nextImageUrl = uploadedImage.imageUrl
+        }
+      } else if (!isVideoPage && nextImageUrl.trim() && isSupabaseConfigured) {
         const imageBlob = await fetchImageUrlAsBlob(nextImageUrl)
         const imageMeta = await readImageDimensions(imageBlob)
 
@@ -555,29 +711,32 @@ export function PostModal({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="imageUrl">Image URL</Label>
+            <Label htmlFor="imageUrl">{isVideoPage ? 'Video URL' : 'Image URL'}</Label>
             <Input
               id="imageUrl"
               value={formData.imageUrl}
               onChange={(e) => setFormData((prev) => ({ ...prev, imageUrl: e.target.value }))}
-              placeholder="https://example.com/image.jpg"
+              placeholder={isVideoPage ? 'https://drive.google.com/...' : 'https://example.com/image.jpg'}
             />
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="imageFile">
-              Upload Image {isSupabaseConfigured ? '(optional)' : '(requires Supabase config)'}
+              {isVideoPage
+                ? 'Upload Video to Google Drive (optional)'
+                : `Upload Image ${isSupabaseConfigured ? '(optional)' : '(requires Supabase config)'}`}
             </Label>
             <Input
               id="imageFile"
               type="file"
-              accept="image/*"
+              accept={isVideoPage ? 'video/*' : 'image/*'}
               onChange={async (e) => {
                 const file = e.target.files?.[0] ?? null
                 setSelectedFile(file)
                 setSelectedImageMeta(null)
 
                 if (!file) return
+                if (isVideoPage) return
 
                 try {
                   const meta = await readImageDimensions(file)
@@ -586,7 +745,7 @@ export function PostModal({
                   setErrorMessage(error instanceof Error ? error.message : 'Failed to inspect image.')
                 }
               }}
-              disabled={!isSupabaseConfigured || isSaving}
+              disabled={isSaving || (!isVideoPage && !isSupabaseConfigured)}
             />
             {selectedFile && (
               <div className="space-y-1">
@@ -599,9 +758,47 @@ export function PostModal({
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              You can also paste an image here with `Ctrl + V`.
+              {isVideoPage
+                ? 'Video files are saved to Google Drive. The post keeps the caption, schedule, and Drive link.'
+                : 'You can also paste an image here with `Ctrl + V`.'}
             </p>
           </div>
+
+          {previewVideoUrl && (
+            <div className="space-y-2">
+              <Label>Video preview</Label>
+              <video
+                src={previewVideoUrl}
+                controls
+                className="max-h-72 w-full rounded-md border border-border bg-black"
+              />
+            </div>
+          )}
+
+          {driveVideoPreviewUrl && (
+            <div className="space-y-2">
+              <Label>Google Drive preview</Label>
+              <div className="overflow-hidden rounded-md border border-border bg-black">
+                <iframe
+                  src={driveVideoPreviewUrl}
+                  allow="autoplay; encrypted-media; fullscreen"
+                  allowFullScreen
+                  className="aspect-video w-full"
+                  title="Google Drive video preview"
+                />
+              </div>
+              {formData.imageUrl.trim() && (
+                <a
+                  href={formData.imageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block truncate text-xs text-primary hover:underline"
+                >
+                  Open video in Google Drive
+                </a>
+              )}
+            </div>
+          )}
 
           {!isEditing && (
             <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">

@@ -1,5 +1,5 @@
 const SHEETS = {
-  pages: ['id', 'name', 'page_url', 'is_active', 'time_slots', 'notes', 'created_at', 'updated_at', 'logo_url', 'brand_color', 'posts_per_day'],
+  pages: ['id', 'name', 'page_url', 'is_active', 'time_slots', 'notes', 'created_at', 'updated_at', 'logo_url', 'brand_color', 'posts_per_day', 'media_type'],
   posts: [
     'id',
     'page_id',
@@ -19,7 +19,7 @@ const SHEETS = {
 }
 
 const BACKUP_TABLE_HEADERS = {
-  pages: ['id', 'name', 'page_url', 'logo_url', 'brand_color', 'is_active', 'posts_per_day', 'time_slots', 'cta_templates', 'notes', 'created_at', 'updated_at'],
+  pages: ['id', 'name', 'page_url', 'logo_url', 'brand_color', 'is_active', 'posts_per_day', 'time_slots', 'cta_templates', 'media_type', 'notes', 'created_at', 'updated_at'],
   vias: ['id', 'account_name', 'account_link', 'account_password', 'display_name', 'two_factor_code', 'outlook_email', 'outlook_password', 'via_email', 'avatar_url', 'source_avatar_url', 'avatar_drive_file_id', 'avatar_drive_web_view_link', 'avatar_drive_direct_url', 'avatar_drive_copy_error', 'description', 'notes', 'status', 'location', 'created_at', 'updated_at'],
   page_vias: ['page_id', 'via_id', 'created_at'],
   posts: ['id', 'page_id', 'post_date', 'time_slot', 'image_path', 'image_url', 'source_image_url', 'drive_file_id', 'drive_web_view_link', 'drive_direct_url', 'drive_copy_error', 'caption', 'ads_link', 'status', 'notes', 'created_at', 'updated_at'],
@@ -163,6 +163,14 @@ function readBackupSheetObjects(spreadsheet, sheetName, expectedHeaders) {
 
 function copyPostImageToDrive(row, folderId, makePublic, mediaCache) {
   const nextRow = Object.assign({}, row)
+  const existingDriveFileId = extractDriveFileId(row.image_path) || extractDriveFileId(row.image_url)
+  if (existingDriveFileId) {
+    nextRow.drive_file_id = existingDriveFileId
+    nextRow.drive_web_view_link = `https://drive.google.com/file/d/${encodeURIComponent(existingDriveFileId)}/view`
+    nextRow.drive_direct_url = `https://drive.google.com/uc?id=${encodeURIComponent(existingDriveFileId)}`
+    return nextRow
+  }
+
   const sourceUrl = String(row.image_url || '').trim()
   if (!sourceUrl || sourceUrl.indexOf('http') !== 0) return nextRow
 
@@ -562,6 +570,7 @@ function pagePayload(input, includeDefaults) {
   copyField(payload, input, 'is_active', includeDefaults ? 'true' : undefined)
   copyField(payload, input, 'posts_per_day', includeDefaults ? '1' : undefined)
   copyField(payload, input, 'time_slots', includeDefaults ? '' : undefined)
+  copyField(payload, input, 'media_type', includeDefaults ? 'image' : undefined)
   copyField(payload, input, 'notes', includeDefaults ? '' : undefined)
   payload.updated_at = new Date().toISOString()
   return payload

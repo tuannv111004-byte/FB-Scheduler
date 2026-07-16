@@ -105,6 +105,24 @@ const sportsCtaPreset = [
   'Full details for fans here:',
 ]
 
+const storyCtaPreset = [
+  'Part 2 is here:',
+  'Read Part 2 here:',
+  'Want to know what happened next? Read Part 2 here:',
+  'The ending continues in Part 2:',
+  'The truth comes out in Part 2:',
+  'The next part is here:',
+  'Click here to continue with Part 2:',
+  'Read the next part here:',
+  'The story is not over yet. Part 2 is here:',
+  'See what happened next in Part 2:',
+  'Part 2 reveals the twist:',
+  'Continue the story here:',
+  'If you want the rest of the story, Part 2 is here:',
+  'The shocking follow-up is in Part 2:',
+  'Find out how it ends in Part 2:',
+]
+
 type GoogleBackupResponse = {
   ok: boolean
   error?: string
@@ -234,6 +252,43 @@ export default function SettingsPage() {
     } catch (error) {
       toast({
         title: 'Failed to add sports CTA pack',
+        description: error instanceof Error ? error.message : 'Could not update page CTAs.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingCta(false)
+    }
+  }
+
+  const handleAddStoryCtaPack = async () => {
+    if (selectedCtaPages.length === 0) {
+      toast({
+        title: 'No pages selected',
+        description: 'Select at least one page before adding the story CTA pack.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsSavingCta(true)
+    try {
+      await Promise.all(
+        activePages
+          .filter((page) => selectedCtaPages.includes(page.id))
+          .map((page) => {
+            const existing = new Set(page.ctaTemplates.map(normalizeCta))
+            const newCtas = storyCtaPreset.filter((cta) => !existing.has(normalizeCta(cta)))
+            if (newCtas.length === 0) return Promise.resolve()
+            return updatePage(page.id, { ctaTemplates: [...page.ctaTemplates, ...newCtas] })
+          })
+      )
+      toast({
+        title: 'Story CTA pack added',
+        description: `Added Part 2 story CTAs to ${selectedCtaPages.length} page${selectedCtaPages.length === 1 ? '' : 's'}.`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Failed to add story CTA pack',
         description: error instanceof Error ? error.message : 'Could not update page CTAs.',
         variant: 'destructive',
       })
@@ -642,6 +697,18 @@ export default function SettingsPage() {
                   >
                     Replace Selected CTAs
                   </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void handleAddStoryCtaPack()}
+                    disabled={isSavingCta}
+                    className="w-full"
+                  >
+                    Add Story CTA Pack
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Good for serialized stories, Part 2 hooks, and read-more link posts.
+                  </p>
                   <Button
                     type="button"
                     variant="secondary"

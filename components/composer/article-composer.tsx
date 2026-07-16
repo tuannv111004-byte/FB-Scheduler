@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -28,7 +29,13 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { useAppStore } from '@/lib/store'
 import { uploadPostImage } from '@/lib/supabase'
-import type { Post, PostStatus } from '@/lib/types'
+import {
+  getGoogleDrivePreviewUrl,
+  getGoogleDriveThumbnailUrl,
+  isGoogleDriveUrl,
+  isVideoUrl,
+} from '@/lib/media-utils'
+import type { FacebookPage, Post, PostStatus } from '@/lib/types'
 import {
   AlertTriangle,
   Bold,
@@ -43,6 +50,8 @@ import {
   RotateCcw,
   Scissors,
   Trash2,
+  Upload,
+  Video,
   Wand2,
 } from 'lucide-react'
 
@@ -384,18 +393,45 @@ function normalizeImportedDraft(item: unknown, index: number): Partial<ArticleDr
   return importedDraft
 }
 
-function createDraftFromPost(post: Post) {
+function getPostMediaUrl(post?: Post) {
+  return post?.imageUrl || post?.imagePath || ''
+}
+
+function isPostVideoSource(post: Post | undefined, pages: FacebookPage[]) {
+  if (!post) return false
+
+  const page = pages.find((item) => item.id === post.pageId)
+  const mediaUrl = getPostMediaUrl(post)
+  return page?.mediaType === 'video' || isVideoUrl(mediaUrl) || isGoogleDriveUrl(mediaUrl)
+}
+
+function createDraftFromPostForComposer(post: Post, pages: FacebookPage[]) {
+  const mediaUrl = getPostMediaUrl(post)
+  const isVideoSource = isPostVideoSource(post, pages)
+  const driveThumbnailUrl = isVideoSource ? getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl) : ''
+
   return createDraft({
-    image: post.imageUrl ?? post.imagePath ?? '',
+    image: isVideoSource ? driveThumbnailUrl : mediaUrl,
     sourcePostId: post.id,
     postCaption: post.caption,
   })
 }
 
-function hydrateDraftFromPost(draft: ArticleDraft, post: Post) {
+function getPostComposerPreviewUrl(post: Post, pages: FacebookPage[]) {
+  const mediaUrl = getPostMediaUrl(post)
+  if (!isPostVideoSource(post, pages)) return mediaUrl
+
+  return getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl)
+}
+
+function hydrateDraftFromPostForComposer(draft: ArticleDraft, post: Post, pages: FacebookPage[]) {
+  const isVideoSource = isPostVideoSource(post, pages)
+  const mediaUrl = getPostMediaUrl(post)
+  const driveThumbnailUrl = isVideoSource ? getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl) : ''
+
   return {
     ...draft,
-    image: draft.image || post.imageUrl || post.imagePath || '',
+    image: draft.image || driveThumbnailUrl || (isVideoSource ? '' : mediaUrl),
     postCaption: draft.postCaption || post.caption,
   }
 }
@@ -411,6 +447,81 @@ async function imageUrlToFile(imageUrl: string) {
   return new File([blob], `thumbnail-collage.${extension}`, {
     type: blob.type || 'image/jpeg',
   })
+}
+
+function captureVideoFrameAsFile(videoUrl: string, seekSeconds = 0.1) {
+  return new Promise<File>((resolve, reject) => {
+    const video = document.createElement('video')
+    const cleanup = () => {
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
+
+    const fail = (message: string) => {
+      cleanup()
+      reject(new Error(message))
+    }
+
+    video.crossOrigin = 'anonymous'
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'metadata'
+
+    video.onloadedmetadata = () => {
+      if (!video.videoWidth || !video.videoHeight) {
+        fail('Could not read the video dimensions.')
+        return
+      }
+
+      const targetTime = Math.min(Math.max(seekSeconds, 0), Math.max(video.duration - 0.05, 0))
+      video.currentTime = Number.isFinite(targetTime) ? targetTime : 0
+    }
+
+    video.onseeked = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const context = canvas.getContext('2d')
+        if (!context) {
+          fail('Could not prepare the video frame.')
+          return
+        }
+
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        canvas.toBlob(
+          (blob) => {
+            cleanup()
+            if (!blob) {
+              reject(new Error('Could not create the video thumbnail image.'))
+              return
+            }
+
+            resolve(new File([blob], 'video-first-frame.webp', { type: 'image/webp' }))
+          },
+          'image/webp',
+          0.88
+        )
+      } catch {
+        fail('Could not capture this video frame. The video host may block browser frame capture.')
+      }
+    }
+
+    video.onerror = () => fail('Could not load the video for thumbnail capture.')
+    video.src = videoUrl
+  })
+}
+
+function extractImageFileFromClipboard(event: React.ClipboardEvent) {
+  for (const item of Array.from(event.clipboardData.items)) {
+    if (!item.type.startsWith('image/')) continue
+
+    const file = item.getAsFile()
+    if (file) return file
+  }
+
+  return null
 }
 
 function loadImage(file: File) {
@@ -541,6 +652,8 @@ export function ArticleComposer() {
   const [dismissedPostIds, setDismissedPostIds] = useState<string[]>([])
   const [isStartingExtension, setIsStartingExtension] = useState(false)
   const [isInsertingCollageImages, setIsInsertingCollageImages] = useState(false)
+  const [isUploadingFrameThumbnail, setIsUploadingFrameThumbnail] = useState(false)
+  const [isCapturingVideoThumbnail, setIsCapturingVideoThumbnail] = useState(false)
 
   const activeDraft = drafts[activeIndex] ?? drafts[0] ?? createDraft()
   const activeDraftWarnings = useMemo(() => getDraftWarnings(activeDraft), [activeDraft])
@@ -624,6 +737,17 @@ export function ArticleComposer() {
     () => posts.find((post) => post.id === activeDraft.sourcePostId),
     [activeDraft.sourcePostId, posts]
   )
+  const activeSourcePostPage = activeSourcePost
+    ? pages.find((page) => page.id === activeSourcePost.pageId)
+    : undefined
+  const activeSourceMediaUrl = activeSourcePost?.imageUrl || activeSourcePost?.imagePath || ''
+  const activeSourceIsVideo =
+    activeSourcePostPage?.mediaType === 'video' ||
+    isVideoUrl(activeSourceMediaUrl) ||
+    isGoogleDriveUrl(activeSourceMediaUrl)
+  const activeSourceDrivePreviewUrl = activeSourceIsVideo
+    ? getGoogleDrivePreviewUrl(activeSourcePost?.imagePath, activeSourcePost?.imageUrl)
+    : ''
   const splitPastedCollagePageKey = sourcePageId || 'all'
   const splitPastedCollage = splitPastedCollageByPageId[splitPastedCollagePageKey] ?? false
   const captionTargetPosts = useMemo(() => {
@@ -695,7 +819,7 @@ export function ArticleComposer() {
 
     setDrafts((current) =>
       current.map((item, itemIndex) =>
-        itemIndex === index ? hydrateDraftFromPost(item, sourcePost) : item
+        itemIndex === index ? hydrateDraftFromPostForComposer(item, sourcePost, pages) : item
       )
     )
   }
@@ -739,7 +863,7 @@ export function ArticleComposer() {
       return
     }
 
-    const newDrafts = selectedSourcePosts.map(createDraftFromPost)
+    const newDrafts = selectedSourcePosts.map((post) => createDraftFromPostForComposer(post, pages))
 
     setDrafts((current) => {
       const shouldReplaceBlank = current.length === 1 && isBlankDraft(current[0])
@@ -748,6 +872,7 @@ export function ArticleComposer() {
       return next
     })
     toast({ title: `${newDrafts.length} element${newDrafts.length > 1 ? 's' : ''} created` })
+    void captureVideoThumbnailsForPosts(selectedSourcePosts, { onlyMissing: true })
   }
 
   const removeActiveElement = () => {
@@ -786,6 +911,141 @@ export function ArticleComposer() {
     updateActiveDraft({
       description: `${activeDraft.description}${activeDraft.description ? '\n' : ''}${snippet}`,
     })
+  }
+
+  const uploadFrameThumbnail = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Frame must be an image',
+        description: 'Paste or upload a screenshot image from the video.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsUploadingFrameThumbnail(true)
+    try {
+      const uploadedImage = await uploadPostImage(file)
+      updateActiveDraft({ image: uploadedImage.imageUrl })
+      toast({
+        title: 'Video frame added',
+        description: 'The frame image is now the thumbnail for this element.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Could not upload frame',
+        description: error instanceof Error ? error.message : 'The pasted frame could not be uploaded.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsUploadingFrameThumbnail(false)
+    }
+  }
+
+  const captureAndUploadVideoThumbnail = async (post: Post) => {
+    const mediaUrl = getPostMediaUrl(post)
+    if (!mediaUrl || !isPostVideoSource(post, pages)) return ''
+
+    const driveThumbnailUrl = getGoogleDriveThumbnailUrl(post.imagePath, post.imageUrl)
+    if (driveThumbnailUrl) return driveThumbnailUrl
+
+    const frameFile = await captureVideoFrameAsFile(mediaUrl)
+    const uploadedImage = await uploadPostImage(frameFile)
+    return uploadedImage.imageUrl
+  }
+
+  const captureVideoThumbnailsForPosts = async (
+    targetPosts: Post[],
+    options: { onlyMissing?: boolean } = {}
+  ) => {
+    const videoPosts = targetPosts.filter((post) => isPostVideoSource(post, pages))
+    if (videoPosts.length === 0) return
+
+    setIsCapturingVideoThumbnail(true)
+    let capturedCount = 0
+    let failedCount = 0
+
+    try {
+      for (const post of videoPosts) {
+        try {
+          const thumbnailUrl = await captureAndUploadVideoThumbnail(post)
+          if (!thumbnailUrl) continue
+
+          setDrafts((current) =>
+            current.map((draft) => {
+              if (draft.sourcePostId !== post.id) return draft
+              if (options.onlyMissing && draft.image.trim()) return draft
+              return { ...draft, image: thumbnailUrl }
+            })
+          )
+          capturedCount += 1
+        } catch {
+          failedCount += 1
+        }
+      }
+
+      if (capturedCount > 0) {
+        toast({
+          title: 'Video thumbnails ready',
+          description: `${capturedCount} first-frame thumbnail${capturedCount > 1 ? 's' : ''} added.`,
+        })
+      }
+
+      if (failedCount > 0) {
+        toast({
+          title: 'Some thumbnails need manual capture',
+          description: `${failedCount} video${failedCount > 1 ? 's' : ''} could not be captured by the browser. Use Paste or upload frame.`,
+          variant: 'destructive',
+        })
+      }
+    } finally {
+      setIsCapturingVideoThumbnail(false)
+    }
+  }
+
+  const useActiveVideoFirstFrame = async () => {
+    if (!activeSourcePost || !activeSourceIsVideo) return
+
+    setIsCapturingVideoThumbnail(true)
+    try {
+      const thumbnailUrl = await captureAndUploadVideoThumbnail(activeSourcePost)
+      if (!thumbnailUrl) throw new Error('This video does not have a capturable thumbnail.')
+
+      updateActiveDraft({ image: thumbnailUrl })
+      toast({
+        title: 'First frame added',
+        description: 'The video first frame is now the thumbnail for this element.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Could not get first frame',
+        description:
+          error instanceof Error
+            ? error.message
+            : 'This video host may block browser frame capture. Use Paste or upload frame.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsCapturingVideoThumbnail(false)
+    }
+  }
+
+  const autoFillVideoThumbnails = async () => {
+    const targetPosts = drafts
+      .filter((draft) => !draft.image.trim() && draft.sourcePostId.trim())
+      .map((draft) => posts.find((post) => post.id === draft.sourcePostId))
+      .filter((post): post is Post => Boolean(post))
+
+    const videoPosts = targetPosts.filter((post) => isPostVideoSource(post, pages))
+    if (videoPosts.length === 0) {
+      toast({
+        title: 'No missing video thumbnails',
+        description: 'Every video element already has a thumbnail or no video elements were found.',
+      })
+      return
+    }
+
+    await captureVideoThumbnailsForPosts(videoPosts, { onlyMissing: true })
   }
 
   const insertCollageImages = async () => {
@@ -1124,7 +1384,7 @@ export function ArticleComposer() {
       const currentPostIds = new Set(current.map((draft) => draft.sourcePostId).filter(Boolean))
       const missingDrafts = draftPostCandidates
         .filter((post) => !currentPostIds.has(post.id))
-        .map(createDraftFromPost)
+        .map((post) => createDraftFromPostForComposer(post, pages))
 
       if (missingDrafts.length === 0) return current
 
@@ -1134,7 +1394,7 @@ export function ArticleComposer() {
 
       return [...current, ...missingDrafts]
     })
-  }, [draftPostCandidates, hasLoadedSavedComposerState])
+  }, [draftPostCandidates, hasLoadedSavedComposerState, pages])
 
   useEffect(() => {
     if (activeIndex > drafts.length - 1) {
@@ -1251,6 +1511,9 @@ export function ArticleComposer() {
               <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
                 <DialogHeader>
                   <DialogTitle>Advanced</DialogTitle>
+                  <DialogDescription>
+                    Review generated JSON and import edited article payloads.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <Card className="border-border bg-card">
@@ -1418,21 +1681,40 @@ export function ArticleComposer() {
               <div className="grid max-h-[240px] gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {sourceCandidates.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                    No posts with images found for this date and time.
+                    No posts with media found for this date and time.
                   </div>
                 ) : (
-                  sourceCandidates.map((post) => (
+                  sourceCandidates.map((post) => {
+                    const previewUrl = getPostComposerPreviewUrl(post, pages)
+                    const isVideoPost = isPostVideoSource(post, pages)
+                    const mediaUrl = getPostMediaUrl(post)
+
+                    return (
                     <label
                       key={post.id}
                       className="group flex cursor-pointer gap-2 rounded-md border border-border bg-background p-2 transition-colors hover:bg-accent/40"
                     >
                       {(post.imageUrl || post.imagePath) && (
                         <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded bg-secondary">
-                          <img
-                            src={post.imageUrl ?? post.imagePath}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
+                          {previewUrl ? (
+                            <img
+                              src={previewUrl}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : isVideoPost && mediaUrl ? (
+                            <video
+                              src={mediaUrl}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <Video className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                          )}
                           <div className="absolute left-1 top-1">
                             <Checkbox
                               checked={selectedPostIds.includes(post.id)}
@@ -1440,6 +1722,11 @@ export function ArticleComposer() {
                               className="border-background bg-background/90 shadow"
                             />
                           </div>
+                          {isVideoPost ? (
+                            <div className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[10px] font-medium text-white">
+                              Video
+                            </div>
+                          ) : null}
                         </div>
                       )}
                       <div className="min-w-0 flex-1 space-y-1">
@@ -1452,7 +1739,8 @@ export function ArticleComposer() {
                         </p>
                       </div>
                     </label>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </CardContent>
@@ -1463,10 +1751,22 @@ export function ArticleComposer() {
               <CardHeader className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-base">Elements</CardTitle>
-                  <Button type="button" size="sm" onClick={addElement}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void autoFillVideoThumbnails()}
+                      disabled={isCapturingVideoThumbnail || drafts.length === 0}
+                    >
+                      <ImageIcon className="mr-2 h-4 w-4" />
+                      {isCapturingVideoThumbnail ? 'Auto...' : 'Auto thumbnails'}
+                    </Button>
+                    <Button type="button" size="sm" onClick={addElement}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1571,7 +1871,10 @@ export function ArticleComposer() {
                   ) : filteredDraftEntries.map(({ draft, index, sourcePost }) => {
                     const warningCount = draftWarningCounts[index] ?? 0
                     const shouldShake = validationPulse > 0 && warningCount > 0
-                    const imageUrl = draft.image || sourcePost?.imageUrl || sourcePost?.imagePath || ''
+                    const sourcePreviewUrl = sourcePost ? getPostComposerPreviewUrl(sourcePost, pages) : ''
+                    const sourceMediaUrl = getPostMediaUrl(sourcePost)
+                    const sourceIsVideo = isPostVideoSource(sourcePost, pages)
+                    const imageUrl = draft.image || sourcePreviewUrl
                     const pageName = sourcePost ? getPageName(sourcePost.pageId) : 'No target post'
                     const dateLabel = sourcePost?.postDate ?? ''
                     const timeLabel = sourcePost?.timeSlot ?? `Element ${index + 1}`
@@ -1594,10 +1897,32 @@ export function ArticleComposer() {
                         {imageUrl ? (
                           <div className="relative h-14 w-16 shrink-0 overflow-hidden rounded bg-secondary">
                             <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                            {sourceIsVideo ? (
+                              <div className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-medium text-white">
+                                VID
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : sourceIsVideo && sourceMediaUrl ? (
+                          <div className="relative h-14 w-16 shrink-0 overflow-hidden rounded bg-secondary">
+                            <video
+                              src={sourceMediaUrl}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              className="h-full w-full object-cover"
+                            />
+                            <div className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-medium text-white">
+                              VID
+                            </div>
                           </div>
                         ) : (
                           <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded bg-secondary">
-                            <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                            {sourceIsVideo ? (
+                              <Video className="h-5 w-5 text-muted-foreground" />
+                            ) : (
+                              <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                            )}
                           </div>
                         )}
                         <span className="min-w-0 flex-1 space-y-1">
@@ -1779,6 +2104,89 @@ export function ArticleComposer() {
                   </div>
 
                   <div className="space-y-4">
+                    {activeSourceIsVideo && (
+                      <div
+                        className="space-y-3 rounded-md border border-border bg-background p-3"
+                        onPaste={(event) => {
+                          const imageFile = extractImageFileFromClipboard(event)
+                          if (!imageFile) return
+
+                          event.preventDefault()
+                          void uploadFrameThumbnail(imageFile)
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <Label className="flex items-center gap-2">
+                            <Video className="h-4 w-4" />
+                            Video source
+                          </Label>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={isCapturingVideoThumbnail || isUploadingFrameThumbnail || !activeSourcePost}
+                              onClick={() => void useActiveVideoFirstFrame()}
+                            >
+                              <ImageIcon className="mr-2 h-4 w-4" />
+                              {isCapturingVideoThumbnail ? 'Getting frame...' : 'Use first frame'}
+                            </Button>
+                            {activeSourcePost?.imageUrl ? (
+                              <a
+                                href={activeSourcePost.imageUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary hover:underline"
+                              >
+                                Open
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+                        {activeSourceDrivePreviewUrl ? (
+                          <div className="overflow-hidden rounded-md border border-border bg-black">
+                            <iframe
+                              src={activeSourceDrivePreviewUrl}
+                              allow="autoplay; encrypted-media; fullscreen"
+                              allowFullScreen
+                              className="aspect-video w-full"
+                              title="Source video preview"
+                            />
+                          </div>
+                        ) : activeSourceMediaUrl ? (
+                          <video
+                            src={activeSourceMediaUrl}
+                            controls
+                            className="aspect-video w-full rounded-md border border-border bg-black"
+                          />
+                        ) : null}
+                        <div className="space-y-2 rounded-md border border-dashed border-border p-3">
+                          <p className="text-xs text-muted-foreground">
+                            Use the first frame as the link ads thumbnail. Google Drive videos use Drive's thumbnail; direct video URLs are captured and uploaded when the browser allows it. You can still paste or upload a custom frame.
+                          </p>
+                          <Input
+                            id="composer-frame-thumbnail-upload"
+                            type="file"
+                            accept="image/*"
+                            className="sr-only"
+                            disabled={isUploadingFrameThumbnail}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0]
+                              if (file) void uploadFrameThumbnail(file)
+                              event.currentTarget.value = ''
+                            }}
+                          />
+                          <Label
+                            htmlFor="composer-frame-thumbnail-upload"
+                            className="flex h-9 w-full cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            {isUploadingFrameThumbnail ? 'Uploading frame...' : 'Paste or upload frame'}
+                          </Label>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="overflow-hidden rounded-md border border-border bg-background">
                       {activeDraft.image ? (
                         <img
@@ -1843,6 +2251,10 @@ export function ArticleComposer() {
                           const post = posts.find((item) => item.id === value)
                           updateActiveDraft({
                             sourcePostId: value === 'none' ? '' : value,
+                            image:
+                              value === 'none'
+                                ? activeDraft.image
+                                : activeDraft.image || (post ? getPostComposerPreviewUrl(post, pages) : ''),
                             postCaption: value === 'none' ? '' : post?.caption ?? '',
                           })
                         }}
@@ -2020,10 +2432,15 @@ export function ArticleComposer() {
               <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
                 {sourceCandidates.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                    No posts with images found for this date and time.
+                    No posts with media found for this date and time.
                   </div>
                 ) : (
-                  sourceCandidates.map((post) => (
+                  sourceCandidates.map((post) => {
+                    const previewUrl = getPostComposerPreviewUrl(post, pages)
+                    const isVideoPost = isPostVideoSource(post, pages)
+                    const mediaUrl = getPostMediaUrl(post)
+
+                    return (
                     <label
                       key={post.id}
                       className="flex cursor-pointer gap-3 rounded-md border border-border p-3 transition-colors hover:bg-accent/40"
@@ -2047,14 +2464,36 @@ export function ArticleComposer() {
                         </p>
                       </div>
                       {(post.imageUrl || post.imagePath) && (
-                        <img
-                          src={post.imageUrl ?? post.imagePath}
-                          alt=""
-                          className="h-12 w-12 rounded object-cover"
-                        />
+                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded bg-secondary">
+                          {previewUrl ? (
+                            <img
+                              src={previewUrl}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : isVideoPost && mediaUrl ? (
+                            <video
+                              src={mediaUrl}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <Video className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                          )}
+                          {isVideoPost ? (
+                            <div className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1 text-[9px] font-medium text-white">
+                              VID
+                            </div>
+                          ) : null}
+                        </div>
                       )}
                     </label>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </CardContent>
