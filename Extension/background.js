@@ -3,6 +3,9 @@ const FEJI_CREATE_URL = "https://s.feji.io/app/links/create";
 const FEJI_LIST_URL = "https://s.feji.io/app/links?page=1";
 const STATE_KEY = "dailyFejiState";
 const SCHEDULER_CONFIG_KEY = "dailyFejiSchedulerConfig";
+const FACEBOOK_CONFIG_KEY = "facebookPublisherConfig";
+const FACEBOOK_STATE_KEY = "facebookPublisherState";
+const FACEBOOK_ALARM_NAME = "facebookPublisherTick";
 const DOMAIN_RULE = [
   "headlinebriefs.com",
   "greendailys.com",
@@ -14,6 +17,7 @@ const DOMAIN_RULE = [
 
 let stopRequested = false;
 let running = false;
+let facebookPreparing = false;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "START_BATCH") {
@@ -34,7 +38,51 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "FACEBOOK_PUBLISHER_CONFIG_CHANGED") {
+    ensureFacebookPublisherAlarm().then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error.message })
+    );
+    return true;
+  }
+
+  if (message?.type === "FACEBOOK_CHECK_DUE_NOW") {
+    checkFacebookDuePosts({ force: true, prepare: false }).then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error.message })
+    );
+    return true;
+  }
+
+  if (message?.type === "FACEBOOK_PREPARE_FIRST_DUE") {
+    checkFacebookDuePosts({ force: true, prepare: true }).then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error.message })
+    );
+    return true;
+  }
+
+  if (message?.type === "FACEBOOK_MARK_FIRST_POSTED") {
+    markFirstFacebookPostPosted().then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error.message })
+    );
+    return true;
+  }
+
   return false;
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === FACEBOOK_ALARM_NAME) {
+    checkFacebookDuePosts({ force: false, prepare: true }).catch((error) => {
+      setFacebookState({ message: error.message });
+    });
+  }
+});
+
+ensureFacebookPublisherAlarm().catch(() => {
+  // The popup can recreate the alarm after settings are saved.
 });
 
 async function runBatch(payload) {
@@ -264,6 +312,260 @@ async function sendToScheduler(rows, scheduler) {
   }
 
   return result;
+}
+
+async function getStoredConfig(key) {
+  return (await chrome.storage.local.get(key))[key] || {};
+}
+
+async function setFacebookState(patch) {
+  const current = (await chrome.storage.local.get(FACEBOOK_STATE_KEY))[FACEBOOK_STATE_KEY] || {};
+  await chrome.storage.local.set({
+    [FACEBOOK_STATE_KEY]: {
+      ...current,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    }
+  });
+}
+
+async function ensureFacebookPublisherAlarm() {
+  const config = await getStoredConfig(FACEBOOK_CONFIG_KEY);
+  await chrome.alarms.clear(FACEBOOK_ALARM_NAME);
+
+  if (config.enabled === true) {
+    await chrome.alarms.create(FACEBOOK_ALARM_NAME, { periodInMinutes: 1 });
+    await setFacebookState({ message: "Facebook publisher watcher is on." });
+  }
+}
+
+function localDateTimeValues(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return {
+    date: `${year}-${month}-${day}`,
+    time: `${hours}:${minutes}`
+  };
+}
+
+async function fetchFacebookDuePosts(limit = 10) {
+  const scheduler = await getStoredConfig(SCHEDULER_CONFIG_KEY);
+  const schedulerUrl = String(scheduler.schedulerUrl || "").replace(/\/+$/, "");
+  const token = String(scheduler.token || "");
+  const now = localDateTimeValues();
+
+  if (!schedulerUrl) throw new Error("Thieu Scheduler URL");
+  if (!token) throw new Error("Thieu Scheduler import token");
+
+  const url = new URL(`${schedulerUrl}/api/extension/facebook-publisher`);
+  url.searchParams.set("date", now.date);
+  url.searchParams.set("time", now.time);
+  url.searchParams.set("limit", String(limit));
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      "Authorization": `Bearer ${token}`
+    }
+  });
+
+  const responseText = await response.text();
+  let result = null;
+  try {
+    result = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    // Keep raw text for the error below.
+  }
+
+  if (!response.ok) {
+    throw new Error(result?.error || responseText || `Scheduler API error ${response.status}`);
+  }
+
+  return Array.isArray(result?.posts) ? result.posts : [];
+}
+
+async function checkFacebookDuePosts({ force, prepare }) {
+  const config = await getStoredConfig(FACEBOOK_CONFIG_KEY);
+  if (!force && config.enabled !== true) return;
+
+  const posts = await fetchFacebookDuePosts(10);
+  await setFacebookState({
+    posts,
+    message: posts.length
+      ? `Found ${posts.length} due Facebook post(s).`
+      : `No due Facebook posts at ${localDateTimeValues().time}.`
+  });
+
+  if (posts.length > 0 && (prepare || config.autoOpen === true)) {
+    await prepareFacebookPost(posts[0]);
+  }
+}
+
+async function markFirstFacebookPostPosted() {
+  const scheduler = await getStoredConfig(SCHEDULER_CONFIG_KEY);
+  const state = await getStoredConfig(FACEBOOK_STATE_KEY);
+  const post = Array.isArray(state.posts) ? state.posts[0] : null;
+  const schedulerUrl = String(scheduler.schedulerUrl || "").replace(/\/+$/, "");
+  const token = String(scheduler.token || "");
+
+  if (!post?.id) throw new Error("No due Facebook post is selected.");
+  if (!schedulerUrl) throw new Error("Thieu Scheduler URL");
+  if (!token) throw new Error("Thieu Scheduler import token");
+
+  const response = await fetch(`${schedulerUrl}/api/extension/facebook-publisher`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      postId: post.id,
+      status: "posted"
+    })
+  });
+
+  const responseText = await response.text();
+  let result = null;
+  try {
+    result = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    // Keep raw text for the error below.
+  }
+
+  if (!response.ok) {
+    throw new Error(result?.error || responseText || `Scheduler API error ${response.status}`);
+  }
+
+  await setFacebookState({
+    posts: Array.isArray(state.posts) ? state.posts.slice(1) : [],
+    message: `Marked posted: ${post.pageName || post.id}`
+  });
+}
+
+async function prepareFacebookPost(post) {
+  if (facebookPreparing) return;
+  facebookPreparing = true;
+
+  try {
+    const targetUrl = post.facebookUrl || post.pageUrl || "https://www.facebook.com/";
+    const tab = await chrome.tabs.create({ url: targetUrl, active: true });
+    await waitForTabComplete(tab.id, 60000);
+
+    const result = await execute(tab.id, facebookPrepareComposerScript, [post]);
+
+    if (post.mediaUrl) {
+      await chrome.tabs.create({ url: post.mediaUrl, active: false });
+    }
+
+    await setFacebookState({
+      preparedPostId: post.id,
+      preparedAt: new Date().toISOString(),
+      message:
+        result?.message ||
+        "Facebook opened. Caption was copied and the composer was prepared when the textbox was found."
+    });
+  } finally {
+    facebookPreparing = false;
+  }
+}
+
+async function facebookPrepareComposerScript(post) {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const caption = String(post?.caption || "");
+  const adsLink = String(post?.adsLink || "");
+  const text = [caption, adsLink].filter(Boolean).join("\n\n");
+  const lower = (value) => String(value || "").toLowerCase();
+
+  async function copyText(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function textMatches(element, tokens) {
+    const haystack = [
+      element.textContent,
+      element.getAttribute("aria-label"),
+      element.getAttribute("placeholder")
+    ].map(lower).join(" ");
+    return tokens.some((token) => haystack.includes(token));
+  }
+
+  function findComposerTrigger() {
+    const tokens = [
+      "what's on your mind",
+      "write something",
+      "create post",
+      "tao bai viet",
+      "ban dang nghi gi",
+      "viet gi do"
+    ];
+    const candidates = [...document.querySelectorAll('div[role="button"], span[role="button"], button, a')];
+    return candidates.find((element) => textMatches(element, tokens));
+  }
+
+  function findComposerTextbox() {
+    const fields = [...document.querySelectorAll('[contenteditable="true"][role="textbox"], [contenteditable="true"], textarea')];
+    return fields.find((element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 80 || rect.height < 18) return false;
+      if (element.closest('[aria-hidden="true"]')) return false;
+      return true;
+    });
+  }
+
+  function insertText(element, value) {
+    element.focus();
+    if (element.tagName === "TEXTAREA" || element.tagName === "INPUT") {
+      element.value = value;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    document.execCommand("selectAll", false, null);
+    document.execCommand("insertText", false, value);
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+  }
+
+  const copied = await copyText(text);
+  let textbox = findComposerTextbox();
+
+  if (!textbox) {
+    const trigger = findComposerTrigger();
+    if (trigger) {
+      trigger.scrollIntoView({ block: "center" });
+      trigger.click();
+      await sleep(1600);
+      textbox = findComposerTextbox();
+    }
+  }
+
+  if (!textbox) {
+    return {
+      ok: true,
+      value: {
+        message: copied
+          ? "Caption copied. Open the Facebook composer, then click Prepare first again."
+          : "Open the Facebook composer, then click Prepare first again."
+      }
+    };
+  }
+
+  insertText(textbox, text);
+  return {
+    ok: true,
+    value: {
+      message: copied
+        ? "Caption inserted and copied. Attach the media tab, then publish manually."
+        : "Caption inserted. Attach the media tab, then publish manually."
+    }
+  };
 }
 
 function domainForNow(date = new Date()) {

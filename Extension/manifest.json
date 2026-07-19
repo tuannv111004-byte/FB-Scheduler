@@ -2,12 +2,14 @@
   "manifest_version": 3,
   "name": "Daily Feji Batch Helper",
   "version": "0.1.1",
-  "description": "Create Daily posts from JSON, create Feji short links, and export results.",
-  "permissions": ["tabs", "scripting", "storage", "clipboardWrite"],
+  "description": "Create Daily posts, create Feji short links, and prepare scheduled Facebook posts.",
+  "permissions": ["tabs", "scripting", "storage", "clipboardWrite", "alarms"],
   "host_permissions": [
     "https://dailychronicle.cfx.bz/*",
     "https://s.feji.io/*",
     "http://s.feji.io/*",
+    "https://www.facebook.com/*",
+    "https://facebook.com/*",
     "https://*/*",
     "http://localhost/*"
   ],

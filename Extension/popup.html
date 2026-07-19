@@ -83,6 +83,25 @@
         </div>
       </section>
 
+      <section class="scheduler">
+        <div class="section-title">Facebook Publisher</div>
+        <label class="check-row">
+          <input id="facebookPublisherEnabled" type="checkbox">
+          <span>Tu dong kiem tra bai toi gio moi phut</span>
+        </label>
+        <label class="check-row">
+          <input id="facebookAutoOpen" type="checkbox">
+          <span>Tu mo Facebook va dien caption cho bai dau tien</span>
+        </label>
+        <div class="actions compact-actions">
+          <button id="facebookCheckBtn" type="button" class="secondary">Check due</button>
+          <button id="facebookPrepareBtn" type="button">Prepare first</button>
+          <button id="facebookMarkPostedBtn" type="button" class="ghost">Mark posted</button>
+        </div>
+        <div id="facebookPublisherStatus" class="mini-status"></div>
+        <textarea id="facebookDuePosts" class="small-results" readonly spellcheck="false"></textarea>
+      </section>
+
       <div class="actions">
         <button id="startBtn" type="button">Start batch</button>
         <button id="stopBtn" type="button" class="secondary">Stop</button>

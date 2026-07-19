@@ -30,6 +30,7 @@ import { toast } from '@/hooks/use-toast'
 import { useAppStore } from '@/lib/store'
 import { uploadPostImage } from '@/lib/supabase'
 import {
+  getGoogleDriveImageUrls,
   getGoogleDrivePreviewUrl,
   getGoogleDriveThumbnailUrl,
   isGoogleDriveUrl,
@@ -116,6 +117,59 @@ function isLikelyHeading(block: string, index: number) {
 function getWordCount(description: string) {
   const text = description.replace(/<[^>]*>/g, ' ').trim()
   return text ? text.split(/\s+/).length : 0
+}
+
+function getImagePreviewUrls(value?: string | null) {
+  const originalUrl = value?.trim()
+  if (!originalUrl) return []
+
+  return Array.from(new Set([originalUrl, ...getGoogleDriveImageUrls(originalUrl)].filter(Boolean)))
+}
+
+function FallbackImage({
+  src,
+  alt = '',
+  className,
+  placeholderClassName,
+  iconClassName = 'h-5 w-5',
+}: {
+  src?: string | null
+  alt?: string
+  className?: string
+  placeholderClassName?: string
+  iconClassName?: string
+}) {
+  const urls = useMemo(() => getImagePreviewUrls(src), [src])
+  const [urlIndex, setUrlIndex] = useState(0)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    setUrlIndex(0)
+    setFailed(false)
+  }, [src])
+
+  if (!urls.length || failed) {
+    return (
+      <div className={`flex items-center justify-center bg-secondary ${placeholderClassName || className || ''}`}>
+        <ImageIcon className={`${iconClassName} text-muted-foreground`} />
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={urls[urlIndex]}
+      alt={alt}
+      className={className}
+      onError={() => {
+        setUrlIndex((currentIndex) => {
+          if (currentIndex < urls.length - 1) return currentIndex + 1
+          setFailed(true)
+          return currentIndex
+        })
+      }}
+    />
+  )
 }
 
 function parseTimeSlotMinutes(timeSlot: string) {
@@ -1697,10 +1751,11 @@ export function ArticleComposer() {
                       {(post.imageUrl || post.imagePath) && (
                         <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded bg-secondary">
                           {previewUrl ? (
-                            <img
+                            <FallbackImage
                               src={previewUrl}
                               alt=""
                               className="h-full w-full object-cover"
+                              placeholderClassName="h-full w-full"
                             />
                           ) : isVideoPost && mediaUrl ? (
                             <video
@@ -1896,7 +1951,12 @@ export function ArticleComposer() {
                       >
                         {imageUrl ? (
                           <div className="relative h-14 w-16 shrink-0 overflow-hidden rounded bg-secondary">
-                            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                            <FallbackImage
+                              src={imageUrl}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              placeholderClassName="h-full w-full"
+                            />
                             {sourceIsVideo ? (
                               <div className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-medium text-white">
                                 VID
@@ -2189,10 +2249,12 @@ export function ArticleComposer() {
 
                     <div className="overflow-hidden rounded-md border border-border bg-background">
                       {activeDraft.image ? (
-                        <img
+                        <FallbackImage
                           src={activeDraft.image}
                           alt=""
                           className="aspect-[4/5] w-full bg-secondary object-cover"
+                          placeholderClassName="aspect-[4/5] w-full"
+                          iconClassName="h-10 w-10"
                         />
                       ) : (
                         <div className="flex aspect-[4/5] w-full items-center justify-center bg-secondary">
@@ -2466,10 +2528,11 @@ export function ArticleComposer() {
                       {(post.imageUrl || post.imagePath) && (
                         <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded bg-secondary">
                           {previewUrl ? (
-                            <img
+                            <FallbackImage
                               src={previewUrl}
                               alt=""
                               className="h-full w-full object-cover"
+                              placeholderClassName="h-full w-full"
                             />
                           ) : isVideoPost && mediaUrl ? (
                             <video
@@ -2518,7 +2581,13 @@ export function ArticleComposer() {
                   <div key={index} className="grid gap-6 border-b border-border pb-6 last:border-0 last:pb-0 lg:grid-cols-[220px_1fr]">
                     <div className="overflow-hidden rounded-lg border border-border bg-secondary">
                       {draft.image ? (
-                        <img src={draft.image} alt="" className="aspect-[4/5] w-full object-cover" />
+                        <FallbackImage
+                          src={draft.image}
+                          alt=""
+                          className="aspect-[4/5] w-full object-cover"
+                          placeholderClassName="aspect-[4/5] w-full"
+                          iconClassName="h-10 w-10"
+                        />
                       ) : (
                         <div className="flex aspect-[4/5] items-center justify-center">
                           <ImageIcon className="h-10 w-10 text-muted-foreground" />

@@ -17,9 +17,18 @@ const schedulerStartDate = document.getElementById("schedulerStartDate");
 const schedulerStartTimeSlot = document.getElementById("schedulerStartTimeSlot");
 const loadSchedulerBtn = document.getElementById("loadSchedulerBtn");
 const schedulerMetaStatus = document.getElementById("schedulerMetaStatus");
+const facebookPublisherEnabled = document.getElementById("facebookPublisherEnabled");
+const facebookAutoOpen = document.getElementById("facebookAutoOpen");
+const facebookCheckBtn = document.getElementById("facebookCheckBtn");
+const facebookPrepareBtn = document.getElementById("facebookPrepareBtn");
+const facebookMarkPostedBtn = document.getElementById("facebookMarkPostedBtn");
+const facebookPublisherStatus = document.getElementById("facebookPublisherStatus");
+const facebookDuePosts = document.getElementById("facebookDuePosts");
 
 const stateKey = "dailyFejiState";
 const schedulerConfigKey = "dailyFejiSchedulerConfig";
+const facebookPublisherConfigKey = "facebookPublisherConfig";
+const facebookPublisherStateKey = "facebookPublisherState";
 let schedulerPages = [];
 
 function normalizeItems(raw) {
@@ -59,9 +68,16 @@ function renderState(state) {
 }
 
 async function loadState() {
-  const data = await chrome.storage.local.get([stateKey, schedulerConfigKey]);
+  const data = await chrome.storage.local.get([
+    stateKey,
+    schedulerConfigKey,
+    facebookPublisherConfigKey,
+    facebookPublisherStateKey
+  ]);
   renderState(data[stateKey] || { status: "idle", results: [] });
   renderSchedulerConfig(data[schedulerConfigKey] || {});
+  renderFacebookPublisherConfig(data[facebookPublisherConfigKey] || {});
+  renderFacebookPublisherState(data[facebookPublisherStateKey] || {});
 }
 
 function todayValue() {
@@ -157,6 +173,37 @@ function readSchedulerConfig() {
 
 async function saveSchedulerConfig() {
   await chrome.storage.local.set({ [schedulerConfigKey]: readSchedulerConfig() });
+}
+
+function renderFacebookPublisherConfig(config) {
+  facebookPublisherEnabled.checked = config.enabled === true;
+  facebookAutoOpen.checked = config.autoOpen === true;
+}
+
+function readFacebookPublisherConfig() {
+  return {
+    enabled: facebookPublisherEnabled.checked,
+    autoOpen: facebookAutoOpen.checked
+  };
+}
+
+async function saveFacebookPublisherConfig() {
+  const config = readFacebookPublisherConfig();
+  await chrome.storage.local.set({ [facebookPublisherConfigKey]: config });
+  await chrome.runtime.sendMessage({ type: "FACEBOOK_PUBLISHER_CONFIG_CHANGED", payload: config });
+}
+
+function renderFacebookPublisherState(state) {
+  const posts = Array.isArray(state.posts) ? state.posts : [];
+  facebookPublisherStatus.textContent = state.message || "";
+  facebookDuePosts.value = posts.length
+    ? posts
+        .map((post, index) => {
+          const media = post.mediaUrl ? `\nmedia: ${post.mediaUrl}` : "";
+          return `${index + 1}. ${post.pageName} | ${post.postDate} ${post.timeSlot} | ${post.status}\n${post.caption}${media}`;
+        })
+        .join("\n\n")
+    : "";
 }
 
 async function loadSchedulerMetadata() {
@@ -259,6 +306,24 @@ clearBtn.addEventListener("click", async () => {
   await loadState();
 });
 
+facebookCheckBtn.addEventListener("click", async () => {
+  facebookPublisherStatus.textContent = "Checking...";
+  await saveSchedulerConfig();
+  await saveFacebookPublisherConfig();
+  const response = await chrome.runtime.sendMessage({ type: "FACEBOOK_CHECK_DUE_NOW" });
+  if (!response?.ok) facebookPublisherStatus.textContent = response?.error || "Check failed";
+});
+
+facebookPrepareBtn.addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({ type: "FACEBOOK_PREPARE_FIRST_DUE" });
+  if (!response?.ok) facebookPublisherStatus.textContent = response?.error || "Prepare failed";
+});
+
+facebookMarkPostedBtn.addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({ type: "FACEBOOK_MARK_FIRST_POSTED" });
+  if (!response?.ok) facebookPublisherStatus.textContent = response?.error || "Mark posted failed";
+});
+
 [
   schedulerEnabled,
   schedulerUrl,
@@ -272,9 +337,16 @@ clearBtn.addEventListener("click", async () => {
   element.addEventListener("input", saveSchedulerConfig);
 });
 
+[facebookPublisherEnabled, facebookAutoOpen].forEach((element) => {
+  element.addEventListener("change", saveFacebookPublisherConfig);
+});
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[stateKey]) {
     renderState(changes[stateKey].newValue);
+  }
+  if (area === "local" && changes[facebookPublisherStateKey]) {
+    renderFacebookPublisherState(changes[facebookPublisherStateKey].newValue || {});
   }
 });
 

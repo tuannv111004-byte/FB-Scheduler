@@ -39,7 +39,6 @@ import { format, addDays, subDays } from 'date-fns'
 import type { Post } from '@/lib/types'
 
 const scheduleSettingsStorageKey = 'postops:schedule-settings'
-const defaultScheduleSlots = ['08:00', '15:00', '20:00', '23:00', '02:00'] as const
 const nextDaySlotBoundaryMinutes = 6 * 60
 
 type ScheduleSettings = {
@@ -192,13 +191,13 @@ export function ScheduleBoard() {
       : `Pages ${visiblePageStart + 1}-${visiblePageEnd} of ${filteredPages.length}`
 
   const allTimeSlots = useMemo(() => {
-    const slots = new Set<string>(defaultScheduleSlots)
-    filteredPages.forEach((page) => {
+    const slots = new Set<string>()
+    visiblePages.forEach((page) => {
       page.timeSlots.forEach((slot) => slots.add(slot))
     })
 
     return [...slots].sort(compareBoardTimeSlots)
-  }, [filteredPages])
+  }, [visiblePages])
 
   const now = new Date()
   const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`

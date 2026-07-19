@@ -56,6 +56,19 @@ export function getGoogleDriveThumbnailUrl(...values: Array<string | null | unde
   return fileId ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w1200` : ''
 }
 
+export function getGoogleDriveImageUrls(...values: Array<string | null | undefined>) {
+  const fileId = values.map(getGoogleDriveFileId).find(Boolean)
+  if (!fileId) return []
+
+  const encodedFileId = encodeURIComponent(fileId)
+  return [
+    `https://drive.google.com/thumbnail?id=${encodedFileId}&sz=w1200`,
+    `https://lh3.googleusercontent.com/d/${encodedFileId}=s1200`,
+    `https://drive.google.com/uc?export=view&id=${encodedFileId}`,
+    `https://drive.google.com/uc?id=${encodedFileId}`,
+  ]
+}
+
 export function isImageFile(file: File | Blob) {
   return file.type.startsWith('image/')
 }

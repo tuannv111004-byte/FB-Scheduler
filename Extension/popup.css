@@ -120,6 +120,19 @@ textarea {
   font-size: 12px;
 }
 
+.mini-status {
+  min-height: 22px;
+  margin-top: 8px;
+  color: #475569;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.small-results {
+  min-height: 90px;
+  margin-top: 6px;
+}
+
 button {
   border: 0;
   border-radius: 6px;
