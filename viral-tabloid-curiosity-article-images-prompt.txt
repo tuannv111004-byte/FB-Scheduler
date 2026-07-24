@@ -27,9 +27,11 @@ STEP 1: VIRAL CAPTION
 Write one short, powerful viral caption, 4-8 lines.
 
 The caption must include:
-- A strong first-line hook with a fitting emoji.
+- A strong first-line hook with a fitting emoji and a clear curiosity gap.
 - A memorable quote or paraphrased reaction from the central figure if provided.
 - A sense of curiosity, emotional tension, or quiet drama.
+- One unanswered question, hidden detail, strange timing, quiet reaction, or "what happened next" angle that makes readers want to click.
+- A natural open loop that does not reveal the full story in the caption.
 - A warm but intriguing tone, like people are discussing a surprising story.
 - An engagement question at the end.
 - A call to click the link.
@@ -38,6 +40,7 @@ The caption must include:
 Tone:
 Conversational, dramatic but not extreme, emotional, curious, and highly clickable.
 Avoid overly shocking, cruel, scandal-heavy, or accusatory language.
+Make the caption feel like the beginning of a story people need to finish, not a summary that gives everything away.
 
 STEP 2: VIRAL TABLOID-STYLE ARTICLE
 
@@ -54,10 +57,22 @@ Required article elements:
 - Background and context about the central figure.
 - A closing section that invites readers to comment, share their view, or join the discussion.
 
+Retention structure:
+- Start with the most emotionally charged visible moment, then delay the full explanation just enough to build curiosity.
+- Keep paragraphs short, usually 2-4 sentences, so the article feels easy to read on mobile.
+- End several early and middle paragraphs with a soft open loop, such as an unanswered detail, a timing question, a subtle reaction, or a clue readers will want explained.
+- Use smooth transitions that make each section feel like it is revealing one more layer of the story.
+- Do not dump all verified facts at once. Reveal context gradually while still staying accurate.
+- Include at least 3 curiosity-driven subheadings that tease the next layer without sounding clickbait-heavy.
+- Maintain emotional momentum through contrast: public moment vs. private meaning, visible reaction vs. unanswered question, rumor vs. verified fact.
+- Place images where they support retention: after the opening tension, near a major context reveal, or before the final emotional turn.
+- The final third should bring the emotional meaning into focus while still leaving readers with a discussion-worthy question.
+
 Writing style:
 Professional, emotionally engaging, curiosity-driven, slightly tabloid, but still believable and polished.
 Create FOMO and discussion without making the story feel cruel, reckless, or overly shocking.
 Focus on mystery, timing, body language, reactions, and unanswered questions.
+Write with strong reader retention: every paragraph should either reveal something, raise a tasteful question, sharpen the emotional stakes, or move the story forward.
 
 STEP 3: ARTICLE IMAGES
 

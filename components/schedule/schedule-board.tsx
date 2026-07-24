@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { ToastAction } from '@/components/ui/toast'
 import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
@@ -24,10 +25,12 @@ import {
   Video,
   Loader2,
   AlertTriangle,
+  Trash2,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/status-badge'
 import { PostModal } from '@/components/posts/post-modal'
 import { cn } from '@/lib/utils'
+import { toast } from '@/hooks/use-toast'
 import {
   getGoogleDriveThumbnailUrl,
   isGoogleDriveUrl,
@@ -112,7 +115,7 @@ function compareBoardTimeSlots(first: string, second: string) {
 }
 
 export function ScheduleBoard() {
-  const { pages, posts, selectedDate, setSelectedDate, markAsPosted, updatePost } = useAppStore()
+  const { pages, posts, selectedDate, setSelectedDate, markAsPosted, updatePost, deletePost, addPost } = useAppStore()
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>(() => {
     const savedValue = readScheduleSettings().selectedPageIds
     return Array.isArray(savedValue) ? savedValue.filter((id) => typeof id === 'string') : []
@@ -482,6 +485,7 @@ export function ScheduleBoard() {
       'yyyy-MM-dd'
     )
     await movePostToScheduleDate(postId, targetDate)
+    setSelectedDate(targetDate)
   }
 
   const getZebraBackground = (pageIndex: number) => {
@@ -504,6 +508,53 @@ export function ScheduleBoard() {
     setEditingPost(null)
     setDefaultSlot({ pageId, timeSlot })
     setModalOpen(true)
+  }
+
+  const handleDeletePost = async (post: Post) => {
+    const deletedPost = { ...post }
+
+    try {
+      await deletePost(post.id)
+      toast({
+        title: 'Post deleted',
+        description: 'Removed from this schedule slot.',
+        action: (
+          <ToastAction
+            altText="Undo delete post"
+            onClick={async () => {
+              try {
+                await addPost({
+                  pageId: deletedPost.pageId,
+                  postDate: deletedPost.postDate,
+                  timeSlot: deletedPost.timeSlot,
+                  imagePath: deletedPost.imagePath,
+                  imageUrl: deletedPost.imageUrl,
+                  caption: deletedPost.caption,
+                  adsLink: deletedPost.adsLink,
+                  status: deletedPost.status,
+                  notes: deletedPost.notes,
+                })
+                toast({ title: 'Post restored' })
+              } catch (error) {
+                toast({
+                  title: 'Could not restore post',
+                  description: error instanceof Error ? error.message : 'The schedule slot may already be filled.',
+                  variant: 'destructive',
+                })
+              }
+            }}
+          >
+            Undo
+          </ToastAction>
+        ),
+      })
+    } catch (error) {
+      toast({
+        title: 'Could not delete post',
+        description: error instanceof Error ? error.message : 'Try again in a moment.',
+        variant: 'destructive',
+      })
+    }
   }
 
   const handleEditPost = (post: Post) => {
@@ -976,7 +1027,24 @@ export function ScheduleBoard() {
                               </div>
                               <div className="flex items-center justify-between mt-2">
                                 <StatusBadge status={post.status} size="sm" />
-                                {post.status !== 'posted' && (
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    draggable={false}
+                                    className="h-6 w-6 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                    title="Delete post"
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onDragStart={(event) => event.preventDefault()}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      suppressPostClickRef.current = false
+                                      void handleDeletePost(post)
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                  {post.status !== 'posted' && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -989,7 +1057,8 @@ export function ScheduleBoard() {
                                   >
                                     <CheckCircle2 className="h-4 w-4" />
                                   </Button>
-                                )}
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ) : (

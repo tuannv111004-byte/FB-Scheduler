@@ -253,6 +253,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   addPost: async (postData) => {
     set({ isSyncing: true })
     try {
+      const duplicatePost = get().posts.find(
+        (post) =>
+          post.pageId === postData.pageId &&
+          post.postDate === postData.postDate &&
+          post.timeSlot === postData.timeSlot
+      )
+      if (duplicatePost) {
+        throw new Error('This page already has a post scheduled for that date and time slot.')
+      }
+
       const newPost = shouldUseSupabaseRemote()
         ? await createPostRemote(postData)
         : {

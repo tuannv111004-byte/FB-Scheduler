@@ -21,13 +21,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -54,6 +47,7 @@ import {
   Video,
   Loader2,
   AlertTriangle,
+  Download,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/status-badge'
 import { PostModal } from './post-modal'
@@ -76,6 +70,7 @@ const targetImageRatio = targetImageWidth / targetImageHeight
 const postsPreferencesStorageKey = 'postops:posts-preferences'
 const autoHighlightRefreshMs = 60 * 1000
 const nextDaySlotBoundaryMinutes = 6 * 60
+const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
 const linkCtaTemplates = {
   sports: [
@@ -126,6 +121,7 @@ type PostsPreferences = {
   filterPageIds?: string[]
   filterTimeSlots?: string[]
   filterStatus?: string
+  filterStatuses?: string[]
   searchQuery?: string
   zoomImagesOnHover?: boolean
   highlightMode?: HighlightMode
@@ -309,6 +305,20 @@ function isNextDayTimeSlot(timeSlot: string) {
   return minutes !== null && minutes < nextDaySlotBoundaryMinutes
 }
 
+function compareTimeSlots(first: string, second: string) {
+  const firstMinutes = parseTimeSlotMinutes(first)
+  const secondMinutes = parseTimeSlotMinutes(second)
+  const firstIsNextDay = isNextDayTimeSlot(first)
+  const secondIsNextDay = isNextDayTimeSlot(second)
+
+  if (firstIsNextDay !== secondIsNextDay) return firstIsNextDay ? 1 : -1
+  if (firstMinutes !== null && secondMinutes !== null && firstMinutes !== secondMinutes) {
+    return firstMinutes - secondMinutes
+  }
+
+  return first.localeCompare(second)
+}
+
 function comparePostsBySchedule(first: Post, second: Post) {
   if (first.postDate !== second.postDate) {
     return first.postDate.localeCompare(second.postDate)
@@ -358,9 +368,19 @@ export function PostsList() {
       ? [preferences.filterPage]
       : []
   })
-  const [filterStatus, setFilterStatus] = useState<string>(() => {
-    const savedValue = readPostsPreferences().filterStatus
-    return typeof savedValue === 'string' && savedValue ? savedValue : 'all'
+  const [filterStatuses, setFilterStatuses] = useState<PostStatus[]>(() => {
+    const preferences = readPostsPreferences()
+    if (Array.isArray(preferences.filterStatuses)) {
+      return preferences.filterStatuses.filter((status): status is PostStatus =>
+        statusOptions.includes(status as PostStatus)
+      )
+    }
+
+    return typeof preferences.filterStatus === 'string' &&
+      preferences.filterStatus !== 'all' &&
+      statusOptions.includes(preferences.filterStatus as PostStatus)
+      ? [preferences.filterStatus as PostStatus]
+      : []
   })
   const [filterTimeSlots, setFilterTimeSlots] = useState<string[]>(() => {
     const savedValue = readPostsPreferences().filterTimeSlots
@@ -403,6 +423,7 @@ export function PostsList() {
     top: number
     left: number
   } | null>(null)
+  const [isExportingVideos, setIsExportingVideos] = useState(false)
   const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null)
   const [currentTime, setCurrentTime] = useState(() => new Date())
 
@@ -503,6 +524,7 @@ export function PostsList() {
 
   const selectedPageIdSet = useMemo(() => new Set(filterPageIds), [filterPageIds])
   const selectedTimeSlotSet = useMemo(() => new Set(filterTimeSlots), [filterTimeSlots])
+  const selectedStatusSet = useMemo(() => new Set(filterStatuses), [filterStatuses])
   const selectedHighlightTimeSet = useMemo(() => new Set(highlightTargetTimes), [highlightTargetTimes])
   const activePages = useMemo(() => pages.filter((page) => page.isActive), [pages])
   const activePageIdSet = useMemo(() => new Set(activePages.map((page) => page.id)), [activePages])
@@ -539,6 +561,12 @@ export function PostsList() {
       : filterTimeSlots.length === 1
       ? filterTimeSlots[0]
       : `${filterTimeSlots.length} Slots`
+  const statusFilterLabel =
+    filterStatuses.length === 0 || filterStatuses.length === statusOptions.length
+      ? 'All Status'
+      : filterStatuses.length === 1
+      ? filterStatuses[0].charAt(0).toUpperCase() + filterStatuses[0].slice(1).replace('_', ' ')
+      : `${filterStatuses.length} Statuses`
   const highlightTimeLabel =
     highlightMode === 'auto'
       ? 'Auto'
@@ -566,6 +594,20 @@ export function PostsList() {
 
   const toggleAllTimeSlots = () => {
     setFilterTimeSlots([])
+  }
+
+  const toggleAllStatuses = () => {
+    setFilterStatuses([])
+  }
+
+  const toggleStatusFilter = (status: PostStatus) => {
+    setFilterStatuses((current) => {
+      if (current.includes(status)) {
+        return current.filter((item) => item !== status)
+      }
+
+      return [...current, status]
+    })
   }
 
   const toggleTimeSlotFilter = (timeSlot: string) => {
@@ -602,7 +644,7 @@ export function PostsList() {
           if (post.postDate !== getDisplayDateForTimeSlot(selectedDate, post.timeSlot)) return false
           if (filterPageIds.length > 0 && !selectedPageIdSet.has(post.pageId)) return false
           if (filterTimeSlots.length > 0 && !selectedTimeSlotSet.has(post.timeSlot)) return false
-          if (filterStatus !== 'all' && post.status !== filterStatus) return false
+          if (filterStatuses.length > 0 && !selectedStatusSet.has(post.status)) return false
           if (searchQuery) {
             const normalizedSearchQuery = searchQuery.toLowerCase()
             const searchableText = [
@@ -621,16 +663,90 @@ export function PostsList() {
         .sort(comparePostsBySchedule),
     [
       filterPageIds.length,
-      filterStatus,
+      filterStatuses.length,
       filterTimeSlots.length,
       activePageIdSet,
       posts,
       searchQuery,
       selectedDate,
       selectedPageIdSet,
+      selectedStatusSet,
       selectedTimeSlotSet,
     ]
   )
+
+  const filteredVideoPosts = useMemo(
+    () =>
+      filteredPosts.filter((post) => {
+        const page = getPageById(post.pageId)
+        return Boolean(post.imageUrl) && (page?.mediaType === 'video' || isVideoUrl(post.imageUrl))
+      }),
+    [filteredPosts, pages]
+  )
+
+  const exportFilteredVideos = async () => {
+    if (filteredVideoPosts.length === 0) {
+      toast({
+        title: 'No videos to export',
+        description: 'The current post filters do not include any video posts.',
+      })
+      return
+    }
+
+    setIsExportingVideos(true)
+    try {
+      const response = await fetch('/api/posts/export-videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: filteredVideoPosts.map((post) => {
+            const page = getPageById(post.pageId)
+            const slotIndex = page
+              ? [...page.timeSlots].sort(compareTimeSlots).findIndex((slot) => slot === post.timeSlot)
+              : -1
+
+            return {
+              id: post.id,
+              pageName: page?.name ?? 'Unknown page',
+              postDate: selectedDate,
+              timeSlot: post.timeSlot,
+              exportOrder: slotIndex >= 0 ? slotIndex + 1 : undefined,
+              imagePath: post.imagePath ?? '',
+              imageUrl: post.imageUrl ?? '',
+            }
+          }),
+        }),
+      })
+
+      const result = (await response.json().catch(() => null)) as {
+        ok?: boolean
+        error?: string
+        exportRoot?: string
+        exported?: Array<{ id: string; filePath: string }>
+        failed?: Array<{ id: string; error: string }>
+      } | null
+
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || 'Could not export videos.')
+      }
+
+      const exportedCount = result.exported?.length ?? 0
+      const failedCount = result.failed?.length ?? 0
+      toast({
+        title: failedCount > 0 ? 'Videos exported with errors' : 'Videos exported',
+        description: `${exportedCount} saved to ${result.exportRoot || 'exports/videos'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`,
+        variant: exportedCount === 0 && failedCount > 0 ? 'destructive' : undefined,
+      })
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Could not export videos.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsExportingVideos(false)
+    }
+  }
 
   useEffect(() => {
     setFilterPageIds((current) => current.filter((pageId) => activePageIdSet.has(pageId)))
@@ -684,8 +800,6 @@ export function PostsList() {
       setIsDeletingDayPosts(false)
     }
   }
-
-  const statusOptions: PostStatus[] = ['draft', 'scheduled', 'ready', 'due_now', 'posted', 'late', 'skipped']
 
   const autoHighlightedPostIds = useMemo(() => {
     const highlighted = new Map<string, TimeHighlightState>()
@@ -802,7 +916,8 @@ export function PostsList() {
           filterPage: filterPageIds.length === 1 ? filterPageIds[0] : 'all',
           filterPageIds,
           filterTimeSlots,
-          filterStatus,
+          filterStatus: filterStatuses.length === 1 ? filterStatuses[0] : 'all',
+          filterStatuses,
           searchQuery,
           zoomImagesOnHover,
           highlightMode,
@@ -812,7 +927,7 @@ export function PostsList() {
       )
   }, [
     filterPageIds,
-    filterStatus,
+    filterStatuses,
     filterTimeSlots,
     highlightMode,
     highlightTargetTimes,
@@ -935,19 +1050,32 @@ export function PostsList() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-40 justify-between">
+                  <span className="truncate">{statusFilterLabel}</span>
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-80 w-48 overflow-y-auto border-border bg-popover">
+                <DropdownMenuCheckboxItem
+                  checked={filterStatuses.length === 0 || filterStatuses.length === statusOptions.length}
+                  onCheckedChange={toggleAllStatuses}
+                >
+                  All Status
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator className="bg-border" />
                 {statusOptions.map((status) => (
-                  <SelectItem key={status} value={status}>
+                  <DropdownMenuCheckboxItem
+                    key={status}
+                    checked={selectedStatusSet.has(status)}
+                    onCheckedChange={() => toggleStatusFilter(status)}
+                  >
                     {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
-                  </SelectItem>
+                  </DropdownMenuCheckboxItem>
                 ))}
-              </SelectContent>
-            </Select>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="w-36 justify-between">
@@ -974,6 +1102,19 @@ export function PostsList() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={exportFilteredVideos}
+              disabled={isExportingVideos || filteredVideoPosts.length === 0}
+            >
+              {isExportingVideos ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {isExportingVideos ? 'Exporting...' : `Export Videos (${filteredVideoPosts.length})`}
+            </Button>
             <div className="ml-auto flex items-center gap-2 rounded-md border border-border px-3 py-2">
               <Label htmlFor="zoom-images" className="text-xs text-muted-foreground">
                 Zoom image hover

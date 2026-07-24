@@ -231,6 +231,7 @@ const titlePrefixPreferencesStorageKey = 'postops:composer-title-prefix'
 const extensionSchedulerConfigStorageKey = 'postops:composer-extension-scheduler-config'
 const extensionPayloadStorageKey = 'postops:daily-feji-extension-payload'
 const composerStateStorageKey = 'postops:composer-state'
+const autoInsertDescriptionImagesStorageKey = 'postops:composer-auto-description-images'
 const composerStateDbName = 'postops-composer'
 const composerStateStoreName = 'state'
 const extensionStartMessageType = 'POSTOPS_START_DAILY_FEJI'
@@ -271,6 +272,7 @@ type SavedComposerState = {
   selectedPostIds?: string[]
   dismissedPostIds?: string[]
   splitPastedCollageByPageId?: Record<string, boolean>
+  autoInsertDescriptionImages?: boolean
 }
 
 function readTitlePrefixPreferences(): Required<TitlePrefixPreferences> {
@@ -449,6 +451,12 @@ function normalizeImportedDraft(item: unknown, index: number): Partial<ArticleDr
 
 function getPostMediaUrl(post?: Post) {
   return post?.imageUrl || post?.imagePath || ''
+}
+
+function readAutoInsertDescriptionImagesPreference() {
+  if (typeof window === 'undefined') return true
+
+  return window.localStorage.getItem(autoInsertDescriptionImagesStorageKey) !== 'false'
 }
 
 function isPostVideoSource(post: Post | undefined, pages: FacebookPage[]) {
@@ -674,6 +682,25 @@ function insertImagesIntoHtml(html: string, imageUrls: string[]) {
   return root.innerHTML
 }
 
+function htmlHasImageSrc(html: string, imageUrl: string) {
+  if (!html.trim()) return false
+
+  const parser = new DOMParser()
+  const document = parser.parseFromString(`<div>${html}</div>`, 'text/html')
+  return Array.from(document.querySelectorAll('img')).some((image) => image.getAttribute('src') === imageUrl)
+}
+
+function insertImageIntoHtmlOnce(html: string, imageUrl: string) {
+  const trimmedImageUrl = imageUrl.trim()
+  if (!trimmedImageUrl || htmlHasImageSrc(html, trimmedImageUrl)) return html
+
+  return insertImagesIntoHtml(html, [trimmedImageUrl])
+}
+
+function getDraftDescriptionImageUrl(draft: ArticleDraft) {
+  return draft.descriptionImage.trim() || draft.image.trim()
+}
+
 export function ArticleComposer() {
   const posts = useAppStore((state) => state.posts)
   const pages = useAppStore((state) => state.pages)
@@ -695,6 +722,9 @@ export function ArticleComposer() {
   )
   const [titlePrefix, setTitlePrefix] = useState(() => readTitlePrefixPreferences().prefix)
   const [splitPastedCollageByPageId, setSplitPastedCollageByPageId] = useState<Record<string, boolean>>({})
+  const [autoInsertDescriptionImages, setAutoInsertDescriptionImages] = useState(
+    readAutoInsertDescriptionImagesPreference
+  )
   const [extensionSchedulerToken, setExtensionSchedulerToken] = useState(
     () => readExtensionSchedulerConfig().token
   )
@@ -958,6 +988,7 @@ export function ArticleComposer() {
     setSelectedPostIds([])
     setDismissedPostIds([])
     setSplitPastedCollageByPageId({})
+    setAutoInsertDescriptionImages(readAutoInsertDescriptionImagesPreference())
     toast({ title: 'Composer reset' })
   }
 
@@ -1416,6 +1447,7 @@ export function ArticleComposer() {
         setSelectedPostIds(savedState.selectedPostIds ?? [])
         setDismissedPostIds(savedState.dismissedPostIds ?? [])
         setSplitPastedCollageByPageId(savedState.splitPastedCollageByPageId ?? {})
+        setAutoInsertDescriptionImages(savedState.autoInsertDescriptionImages ?? readAutoInsertDescriptionImagesPreference())
         window.localStorage.removeItem(composerStateStorageKey)
         setHasLoadedSavedComposerState(true)
       })
@@ -1472,6 +1504,7 @@ export function ArticleComposer() {
         selectedPostIds,
         dismissedPostIds,
         splitPastedCollageByPageId,
+        autoInsertDescriptionImages,
       }).catch(() => {
         // Autosave is best-effort; avoid breaking editing when browser storage is full.
       })
@@ -1480,6 +1513,7 @@ export function ArticleComposer() {
     return () => window.clearTimeout(timeout)
   }, [
     activeIndex,
+    autoInsertDescriptionImages,
     dismissedPostIds,
     drafts,
     hasLoadedSavedComposerState,
@@ -1502,6 +1536,30 @@ export function ArticleComposer() {
       } satisfies ExtensionSchedulerConfig)
     )
   }, [extensionSchedulerStatus, extensionSchedulerToken])
+
+  useEffect(() => {
+    window.localStorage.setItem(autoInsertDescriptionImagesStorageKey, String(autoInsertDescriptionImages))
+  }, [autoInsertDescriptionImages])
+
+  useEffect(() => {
+    if (!autoInsertDescriptionImages) return
+
+    setDrafts((current) => {
+      let changed = false
+      const next = current.map((draft) => {
+        const descriptionImageUrl = getDraftDescriptionImageUrl(draft)
+        if (!descriptionImageUrl || getWordCount(draft.description) === 0) return draft
+
+        const description = insertImageIntoHtmlOnce(draft.description, descriptionImageUrl)
+        if (description === draft.description) return draft
+
+        changed = true
+        return { ...draft, description }
+      })
+
+      return changed ? next : current
+    })
+  }, [autoInsertDescriptionImages, drafts])
 
   return (
     <div className="space-y-6">
@@ -2126,6 +2184,13 @@ export function ArticleComposer() {
                       <div className="flex items-center justify-between gap-3">
                         <Label>Description editor</Label>
                         <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Switch
+                              checked={autoInsertDescriptionImages}
+                              onCheckedChange={setAutoInsertDescriptionImages}
+                            />
+                            Auto image
+                          </label>
                           <label className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Switch
                               checked={splitPastedCollage}

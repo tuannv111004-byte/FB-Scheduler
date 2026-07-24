@@ -16,3 +16,5 @@ fb-schedule-*.json
 node_modules
 .next/
 .DS_Store
+.codex/
+exports/
